@@ -36,7 +36,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
   const { exit } = useApp();
   
   // State management
-  const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
+  const [currentView, setCurrentView] = useState<ViewMode>('history');
   const [currentMode, setCurrentMode] = useState<InteractionMode>('normal');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedCommands, setSelectedCommands] = useState(new Map<string, boolean>());
@@ -57,6 +57,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
   // Apply filters to commands
   const filteredCommands = useMemo(() => {
     let filtered = commands;
+
 
     // Apply text filter if present
     if (filterText) {

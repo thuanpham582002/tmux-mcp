@@ -110,11 +110,10 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
       let line = `${statusIcon} │ ${command} │ ${pane.padEnd(4)} │ ${duration.padEnd(8)} │ ${started.padEnd(10)} │ ${shell}`;
       
       let color: string | undefined;
-      let backgroundColor: string | undefined;
+      let inverse = false;
       
       if (isSelected) {
-        backgroundColor = 'white';
-        color = 'black';
+        inverse = true;
       } else if (isVisuallySelected && currentMode === 'visual') {
         color = 'yellow';
       }
@@ -123,7 +122,7 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
         <Text 
           key={cmd.id}
           color={color}
-          backgroundColor={backgroundColor}
+          inverse={inverse}
         >
           {line}
         </Text>

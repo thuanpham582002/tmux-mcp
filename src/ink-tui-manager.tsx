@@ -1,6 +1,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { InkTUIApp, InkTUIOptions } from './ink-tui-app.js';
+import { commandLogger } from './command-logger.js';
 
 export class InkTUIManager {
   private app: any;
@@ -16,6 +17,9 @@ export class InkTUIManager {
     this.isRunning = true;
 
     try {
+      // Initialize command logger before starting TUI
+      await commandLogger.initialize();
+
       // Render the React Ink application
       this.app = render(<InkTUIApp options={this.options} />);
 

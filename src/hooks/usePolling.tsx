@@ -26,11 +26,13 @@ export const usePolling = (
     };
 
     if (enabled && interval > 0) {
-      // Call once immediately
-      tick();
-      
-      // Then set up recurring calls
-      intervalId.current = setInterval(tick, interval);
+      // Call once immediately and ensure it completes
+      tick().then(() => {
+        // Then set up recurring calls after the initial call
+        if (enabled && interval > 0) {
+          intervalId.current = setInterval(tick, interval);
+        }
+      });
       
       return () => {
         if (intervalId.current) {
