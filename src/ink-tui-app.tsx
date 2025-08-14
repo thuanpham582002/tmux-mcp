@@ -228,8 +228,10 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
     cmd.status === 'running' || cmd.status === 'pending'
   ).length;
   
+  const terminalHeight = process.stdout.rows || 24;
+  
   return (
-    <Box flexDirection="column" height="100%">
+    <Box flexDirection="column" minHeight={terminalHeight}>
       <HeaderBox 
         currentView={currentView}
         currentMode={currentMode}
@@ -238,7 +240,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
         filterText={filterText}
       />
       
-      <Box flexGrow={1} flexDirection="row">
+      <Box flexGrow={1} flexDirection="row" minHeight={terminalHeight - 6}>
         <CommandListBox 
           commands={filteredCommands}
           selectedIndex={selectedIndex}

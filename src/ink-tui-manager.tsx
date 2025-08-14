@@ -20,8 +20,11 @@ export class InkTUIManager {
       // Initialize command logger before starting TUI
       await commandLogger.initialize();
 
-      // Render the React Ink application
-      this.app = render(<InkTUIApp options={this.options} />);
+      // Render the React Ink application in full-screen mode
+      this.app = render(<InkTUIApp options={this.options} />, {
+        exitOnCtrlC: false, // We handle quit ourselves
+        patchConsole: false // Don't interfere with console
+      });
 
       // Wait for the app to exit
       await this.app.waitUntilExit();

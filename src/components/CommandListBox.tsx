@@ -132,6 +132,19 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
       );
     });
 
+    // Fill remaining space with empty lines to occupy full terminal height
+    const terminalHeight = process.stdout.rows || 24;
+    const usedRows = rows.length;
+    const availableRows = Math.max(0, terminalHeight - 6); // Account for header, status bar
+    
+    for (let i = usedRows; i < availableRows; i++) {
+      rows.push(
+        <Text key={`empty-${i}`}>
+          {' '.repeat(75)}
+        </Text>
+      );
+    }
+
     return rows;
   }, [visibleCommands, selectedIndex, selectedCommands, currentMode, scrollOffset]);
 
