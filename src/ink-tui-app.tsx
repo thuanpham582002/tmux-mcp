@@ -229,9 +229,14 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
   ).length;
   
   const terminalHeight = process.stdout.rows || 24;
+  const terminalWidth = process.stdout.columns || 80;
   
   return (
-    <Box flexDirection="column" minHeight={terminalHeight}>
+    <Box 
+      flexDirection="column" 
+      width={terminalWidth}
+      height={terminalHeight}
+    >
       <HeaderBox 
         currentView={currentView}
         currentMode={currentMode}
@@ -240,7 +245,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
         filterText={filterText}
       />
       
-      <Box flexGrow={1} flexDirection="row" minHeight={terminalHeight - 6}>
+      <Box flexGrow={1} flexDirection="row">
         <CommandListBox 
           commands={filteredCommands}
           selectedIndex={selectedIndex}

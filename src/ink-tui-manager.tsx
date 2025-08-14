@@ -20,10 +20,18 @@ export class InkTUIManager {
       // Initialize command logger before starting TUI
       await commandLogger.initialize();
 
+      // Clear screen and go to top-left (like vim/watch behavior)
+      process.stdout.write('\x1b[2J\x1b[H');
+      
+      // Hide cursor for clean TUI experience
+      process.stdout.write('\x1b[?25l');
+
       // Render the React Ink application in full-screen mode
       this.app = render(<InkTUIApp options={this.options} />, {
         exitOnCtrlC: false, // We handle quit ourselves
-        patchConsole: false // Don't interfere with console
+        patchConsole: false, // Don't interfere with console
+        stdout: process.stdout,
+        stdin: process.stdin
       });
 
       // Wait for the app to exit
@@ -38,6 +46,9 @@ export class InkTUIManager {
 
   public cleanup(): void {
     if (this.app && this.isRunning) {
+      // Show cursor again before exiting
+      process.stdout.write('\x1b[?25h');
+      
       this.app.unmount();
       this.isRunning = false;
     }
