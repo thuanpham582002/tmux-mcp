@@ -7,7 +7,7 @@ import { z } from "zod";
 import * as tmux from "./tmux.js";
 import * as enhancedExecutor from "./enhanced-executor.js";
 import { commandLogger } from "./command-logger.js";
-import { TUIManager } from "./tui-manager.js";
+import { InkTUIManager as TUIManager } from "./ink-tui-manager.js";
 import { FzfIntegration } from "./fzf-integration.js";
 
 // Create MCP server

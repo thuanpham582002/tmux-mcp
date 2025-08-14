@@ -1,0 +1,250 @@
+import { useInput } from 'ink';
+import { InteractionMode } from '../ink-tui-app.js';
+
+interface InputHandlers {
+  // Navigation
+  navigateUp: () => void;
+  navigateDown: () => void;
+  goToTop: () => void;
+  goToBottom: () => void;
+  
+  // Advanced vim scrolling
+  halfPageUp: () => void;     // Ctrl+U
+  halfPageDown: () => void;   // Ctrl+D
+  pageUp: () => void;         // Ctrl+B
+  pageDown: () => void;       // Ctrl+F
+  lineUp: () => void;         // Ctrl+Y
+  lineDown: () => void;       // Ctrl+E
+  
+  // Mode management
+  enterVisualMode: () => void;
+  enterCommandMode: () => void;
+  enterSearchMode: () => void;
+  exitCurrentMode: () => void;
+  
+  // View management
+  cycleView: () => void;
+  
+  // Selection and actions
+  toggleSelection: () => void;
+  cancelCurrentCommand: () => Promise<void>;
+  refreshData: () => Promise<void>;
+  
+  // System
+  quit: () => void;
+}
+
+interface UseInputHandlerOptions {
+  currentMode: InteractionMode;
+  handlers: InputHandlers;
+}
+
+export const useInputHandler = ({
+  currentMode,
+  handlers
+}: UseInputHandlerOptions): void => {
+  useInput((input, key) => {
+    // Handle escape key - always available to exit modes
+    if (key.escape) {
+      if (currentMode !== 'normal') {
+        handlers.exitCurrentMode();
+      }
+      return;
+    }
+    
+    // Handle quit commands
+    if (input === 'q' && currentMode === 'normal') {
+      handlers.quit();
+      return;
+    }
+    
+    if (key.ctrl && input === 'c') {
+      handlers.quit();
+      return;
+    }
+    
+    // Mode-specific input handling
+    switch (currentMode) {
+      case 'normal':
+        handleNormalMode(input, key, handlers);
+        break;
+      case 'visual':
+        handleVisualMode(input, key, handlers);
+        break;
+      case 'command':
+      case 'search':
+        // Input handling is managed by CommandInputModal component
+        break;
+    }
+  });
+};
+
+const handleNormalMode = (input: string, key: any, handlers: InputHandlers) => {
+  // Advanced vim scrolling keybindings - these are the key new features!
+  if (key.ctrl) {
+    switch (input) {
+      case 'u': // Ctrl+U - Half page up
+        handlers.halfPageUp();
+        return;
+      case 'd': // Ctrl+D - Half page down
+        handlers.halfPageDown();
+        return;
+      case 'f': // Ctrl+F - Full page forward
+        handlers.pageDown();
+        return;
+      case 'b': // Ctrl+B - Full page backward
+        handlers.pageUp();
+        return;
+      case 'e': // Ctrl+E - Scroll down one line
+        handlers.lineDown();
+        return;
+      case 'y': // Ctrl+Y - Scroll up one line
+        handlers.lineUp();
+        return;
+    }
+  }
+  
+  // Basic vim navigation
+  switch (input) {
+    case 'j':
+      handlers.navigateDown();
+      break;
+    case 'k':
+      handlers.navigateUp();
+      break;
+    case 'h':
+      // TODO: Implement pane switching or keep as view cycle
+      handlers.cycleView();
+      break;
+    case 'l':
+      // TODO: Implement pane switching or keep as view cycle
+      handlers.cycleView();
+      break;
+    case 'G':
+      handlers.goToBottom();
+      break;
+    case 'g':
+      // Note: vim 'gg' is handled as a sequence, simplified to single 'g' for now
+      handlers.goToTop();
+      break;
+  }
+  
+  // Arrow key navigation
+  if (key.upArrow) {
+    handlers.navigateUp();
+  } else if (key.downArrow) {
+    handlers.navigateDown();
+  } else if (key.leftArrow) {
+    handlers.cycleView();
+  } else if (key.rightArrow) {
+    handlers.cycleView();
+  }
+  
+  // Mode switching
+  switch (input) {
+    case 'v':
+      handlers.enterVisualMode();
+      break;
+    case ':':
+      handlers.enterCommandMode();
+      break;
+    case '/':
+      handlers.enterSearchMode();
+      break;
+  }
+  
+  // Actions
+  switch (input) {
+    case 'c':
+      handlers.cancelCurrentCommand();
+      break;
+    case 'r':
+      handlers.refreshData();
+      break;
+  }
+  
+  // View cycling
+  if (key.tab) {
+    handlers.cycleView();
+  }
+  
+  // Help - TODO: implement help modal
+  if (input === '?') {
+    // TODO: Show help modal
+  }
+};
+
+const handleVisualMode = (input: string, key: any, handlers: InputHandlers) => {
+  // In visual mode, we still allow navigation and vim scrolling
+  
+  // Advanced vim scrolling keybindings work in visual mode too
+  if (key.ctrl) {
+    switch (input) {
+      case 'u': // Ctrl+U - Half page up
+        handlers.halfPageUp();
+        return;
+      case 'd': // Ctrl+D - Half page down
+        handlers.halfPageDown();
+        return;
+      case 'f': // Ctrl+F - Full page forward
+        handlers.pageDown();
+        return;
+      case 'b': // Ctrl+B - Full page backward
+        handlers.pageUp();
+        return;
+      case 'e': // Ctrl+E - Scroll down one line
+        handlers.lineDown();
+        return;
+      case 'y': // Ctrl+Y - Scroll up one line
+        handlers.lineUp();
+        return;
+    }
+  }
+  
+  // Basic navigation
+  switch (input) {
+    case 'j':
+      handlers.navigateDown();
+      break;
+    case 'k':
+      handlers.navigateUp();
+      break;
+    case 'G':
+      handlers.goToBottom();
+      break;
+    case 'g':
+      handlers.goToTop();
+      break;
+  }
+  
+  // Arrow key navigation
+  if (key.upArrow) {
+    handlers.navigateUp();
+  } else if (key.downArrow) {
+    handlers.navigateDown();
+  }
+  
+  // Visual mode specific actions
+  if (input === ' ' || key.space) {
+    handlers.toggleSelection();
+  }
+  
+  // Actions on selected items
+  switch (input) {
+    case 'c':
+      handlers.cancelCurrentCommand();
+      break;
+    case 'd':
+      if (!key.ctrl) {
+        // 'd' without Ctrl in visual mode could be delete
+        // For now, just cancel
+        handlers.cancelCurrentCommand();
+      }
+      break;
+  }
+  
+  // Enter key for action
+  if (key.return) {
+    // TODO: Implement action on selected items
+  }
+};
