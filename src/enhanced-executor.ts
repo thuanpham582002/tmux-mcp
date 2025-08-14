@@ -21,10 +21,28 @@ export interface EnhancedCommandExecution {
   currentWorkingDirectory?: string;
 }
 
-// Enhanced command tracking with better state management
-const enhancedActiveCommands = new Map<string, EnhancedCommandExecution>();
+// Note: Enhanced command tracking now uses persistent storage only
+// Memory-based tracking removed in favor of consistent persistent storage
 
 export type ShellType = 'bash' | 'zsh' | 'fish' | 'sh' | 'unknown';
+
+// Helper function to convert CommandLogEntry to EnhancedCommandExecution
+function logEntryToCommand(entry: any): EnhancedCommandExecution {
+  return {
+    id: entry.id,
+    paneId: entry.paneId,
+    command: entry.command,
+    status: entry.status,
+    startTime: new Date(entry.startTime),
+    endTime: entry.endTime ? new Date(entry.endTime) : undefined,
+    exitCode: entry.exitCode,
+    shellType: entry.shellType,
+    currentWorkingDirectory: entry.currentWorkingDirectory,
+    result: entry.result,
+    aborted: entry.aborted || false,
+    retryCount: entry.retryCount || 0
+  };
+}
 
 const SHELL_DETECTION_COMMANDS = {
   bash: 'echo "SHELL_DETECTION:bash:$(pwd):$BASHPID"',
@@ -112,9 +130,7 @@ export async function executeCommandEnhanced(
     retryCount: 0
   };
   
-  enhancedActiveCommands.set(commandId, enhancedCommand);
-  
-  // Log command start
+  // Save to persistent storage immediately
   await commandLogger.logCommandStart(enhancedCommand);
   
   try {
@@ -138,7 +154,7 @@ export async function executeCommandEnhanced(
     
     // Step 3: Send command with tabby-mcp style trap reading logic
     enhancedCommand.status = 'running';
-    enhancedActiveCommands.set(commandId, enhancedCommand);
+    await commandLogger.logCommandUpdate(enhancedCommand);
     
     // Clear any existing input
     await tmux.executeTmux(`send-keys -t '${paneId}' C-c`);
@@ -205,8 +221,6 @@ ${trimmedCommand}
     enhancedCommand.result = result.output;
     enhancedCommand.exitCode = result.exitCode;
     
-    enhancedActiveCommands.set(commandId, enhancedCommand);
-    
     // Log command completion (including timeouts)
     await commandLogger.logCommandUpdate(enhancedCommand);
     
@@ -216,7 +230,6 @@ ${trimmedCommand}
     enhancedCommand.status = 'error';
     enhancedCommand.endTime = new Date();
     enhancedCommand.result = `Error: ${error instanceof Error ? error.message : String(error)}`;
-    enhancedActiveCommands.set(commandId, enhancedCommand);
     
     // Log command error
     await commandLogger.logCommandUpdate(enhancedCommand);
@@ -234,13 +247,22 @@ async function waitForCommandCompletion(
   endMarker: string,
   timeout: number
 ): Promise<{ success: boolean; output: string; exitCode?: number }> {
-  const command = enhancedActiveCommands.get(commandId);
-  if (!command) throw new Error('Command not found');
+  // Get command from persistent storage
+  let commandEntry = await commandLogger.getCommandById(commandId);
+  if (!commandEntry) throw new Error('Command not found');
+  
+  let command = logEntryToCommand(commandEntry);
   
   const startTime = Date.now();
   let lastContent = '';
   
   while (Date.now() - startTime < timeout) {
+    // Refresh command state from persistent storage
+    commandEntry = await commandLogger.getCommandById(commandId);
+    if (commandEntry) {
+      command = logEntryToCommand(commandEntry);
+    }
+    
     // Check if command was cancelled
     if (command.aborted) {
       return { success: false, output: 'Command was cancelled by user' };
@@ -259,22 +281,28 @@ async function waitForCommandCompletion(
       // Look for end marker
       const endIndex = content.lastIndexOf(endMarker);
       if (endIndex > startIndex) {
-        // Command completed, extract exit code and output
-        const endLine = content.substring(endIndex).split('\n')[0];
-        const exitCodeMatch = endLine.match(new RegExp(`${endMarker}(\\d+)`));
+        // Command completed, extract exit code from separate line
+        const exitCodeMatch = content.match(/exit_code:\s*(\d+)/);
         const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
         
-        // Extract output between markers
-        const outputStart = startIndex + startMarker.length;
-        const outputContent = content.substring(outputStart, endIndex).trim();
-        
-        // Remove the command echo line
-        const outputLines = outputContent.split('\n');
-        const cleanOutput = outputLines.slice(1).join('\n').trim();
+        // Find the start marker line end
+        const startMarkerEnd = content.indexOf('\n', startIndex);
+        if (startMarkerEnd === -1) {
+          return { success: false, output: 'Could not find end of start marker' };
+        }
+
+        // Find the end marker line start (go backwards from end marker to find line start)
+        let endMarkerStart = endIndex;
+        while (endMarkerStart > 0 && content[endMarkerStart - 1] !== '\n') {
+          endMarkerStart--;
+        }
+
+        // Extract output between the markers
+        const outputContent = content.substring(startMarkerEnd + 1, endMarkerStart).trim();
         
         return {
           success: exitCode === 0,
-          output: cleanOutput,
+          output: outputContent,
           exitCode
         };
       }
@@ -324,129 +352,76 @@ async function waitForCommandCompletion(
  * Cancel a running command
  */
 export async function cancelCommand(commandId: string): Promise<boolean> {
-  // First check memory commands
-  let command = enhancedActiveCommands.get(commandId);
-  
-  // If not in memory, check persisted active commands
-  if (!command) {
-    try {
-      const activeFromLogs = await commandLogger.getActiveCommands();
-      const logEntry = activeFromLogs[commandId];
-      
-      if (logEntry && (logEntry.status === 'running' || logEntry.status === 'pending')) {
-        // Convert to EnhancedCommandExecution format
-        command = {
-          id: logEntry.id,
-          paneId: logEntry.paneId,
-          command: logEntry.command,
-          status: logEntry.status as any,
-          startTime: new Date(logEntry.startTime),
-          endTime: logEntry.endTime ? new Date(logEntry.endTime) : undefined,
-          exitCode: logEntry.exitCode,
-          shellType: logEntry.shellType as 'bash' | 'zsh' | 'fish' | 'sh' | 'unknown' | undefined,
-          currentWorkingDirectory: logEntry.currentWorkingDirectory,
-          result: logEntry.result,
-          aborted: logEntry.aborted,
-          retryCount: logEntry.retryCount
-        };
-      }
-    } catch (error) {
-      console.error('Error reading persisted commands for cancel:', error);
+  try {
+    // Get command from persistent storage
+    const commandEntry = await commandLogger.getCommandById(commandId);
+    
+    if (!commandEntry || (commandEntry.status !== 'running' && commandEntry.status !== 'pending')) {
+      return false; // Command not found or not cancellable
     }
-  }
-  
-  if (!command) return false;
-  
-  if (command.status === 'running' || command.status === 'pending') {
+    
+    const command = logEntryToCommand(commandEntry);
+    
     // Send Ctrl+C to interrupt the command
-    try {
-      await tmux.executeTmux(`send-keys -t '${command.paneId}' C-c`);
-      command.aborted = true;
-      command.status = 'cancelled';
-      command.endTime = new Date();
-      
-      // Update in memory if it was there
-      if (enhancedActiveCommands.has(commandId)) {
-        enhancedActiveCommands.set(commandId, command);
-      }
-      
-      // Log command cancellation (this will update the persisted logs)
-      await commandLogger.logCommandUpdate(command);
-      
-      return true;
-    } catch (error) {
-      console.error('Error cancelling command:', error);
-      return false;
-    }
+    await tmux.executeTmux(`send-keys -t '${command.paneId}' C-c`);
+    command.aborted = true;
+    command.status = 'cancelled';
+    command.endTime = new Date();
+    
+    // Update persistent storage
+    await commandLogger.logCommandUpdate(command);
+    
+    return true;
+  } catch (error) {
+    console.error('Error cancelling command:', error);
+    return false;
   }
-  
-  return false;
 }
 
 /**
- * Get enhanced command status
+ * Get enhanced command status (from persistent storage)
  */
-export function getEnhancedCommandStatus(commandId: string): EnhancedCommandExecution | null {
-  return enhancedActiveCommands.get(commandId) || null;
+export async function getEnhancedCommandStatus(commandId: string): Promise<EnhancedCommandExecution | null> {
+  try {
+    const commandEntry = await commandLogger.getCommandById(commandId);
+    return commandEntry ? logEntryToCommand(commandEntry) : null;
+  } catch (error) {
+    console.error('Error getting command status:', error);
+    return null;
+  }
 }
 
 /**
- * List all active commands (including from persisted logs)
+ * List all active commands (from persistent storage only)
  */
 export async function listActiveCommands(): Promise<EnhancedCommandExecution[]> {
   try {
-    // Get in-memory active commands
-    const memoryCommands = Array.from(enhancedActiveCommands.values())
-      .filter(cmd => cmd.status === 'running' || cmd.status === 'pending');
-    
-    // Get active commands from logger
+    // Get active commands from persistent storage only
     const activeFromLogs = await commandLogger.getActiveCommands();
     
-    // Convert log entries to EnhancedCommandExecution format
+    // Convert log entries to EnhancedCommandExecution format and filter active
     const persistedActive: EnhancedCommandExecution[] = Object.values(activeFromLogs)
       .filter(entry => entry.status === 'running' || entry.status === 'pending')
-      .map(entry => ({
-        id: entry.id,
-        paneId: entry.paneId,
-        command: entry.command,
-        status: entry.status as any,
-        startTime: new Date(entry.startTime),
-        endTime: entry.endTime ? new Date(entry.endTime) : undefined,
-        exitCode: entry.exitCode,
-        shellType: entry.shellType as 'bash' | 'zsh' | 'fish' | 'sh' | 'unknown' | undefined,
-        currentWorkingDirectory: entry.currentWorkingDirectory,
-        result: entry.result,
-        aborted: entry.aborted,
-        retryCount: entry.retryCount
-      }));
-    
-    // Combine and deduplicate (prefer memory version over persisted)
-    const allActiveCommands = new Map<string, EnhancedCommandExecution>();
-    
-    // Add persisted active commands first
-    persistedActive.forEach(cmd => allActiveCommands.set(cmd.id, cmd));
-    
-    // Add memory commands (will override persisted if same ID)
-    memoryCommands.forEach(cmd => allActiveCommands.set(cmd.id, cmd));
+      .map(entry => logEntryToCommand(entry));
     
     // Sort by start time (newest first)
-    return Array.from(allActiveCommands.values()).sort((a, b) => 
+    return persistedActive.sort((a, b) => 
       b.startTime.getTime() - a.startTime.getTime()
     );
   } catch (error) {
-    // Fallback to memory commands only if there's an error
+    // Fallback to empty array if there's an error
     console.error('Error reading persisted active commands:', error);
-    return Array.from(enhancedActiveCommands.values())
-      .filter(cmd => cmd.status === 'running' || cmd.status === 'pending');
+    return [];
   }
 }
 
 /**
- * Synchronous version for compatibility (only returns memory commands)
+ * Synchronous version for compatibility (deprecated - returns empty array)
+ * Use listActiveCommands() instead
  */
 export function listActiveCommandsSync(): EnhancedCommandExecution[] {
-  return Array.from(enhancedActiveCommands.values())
-    .filter(cmd => cmd.status === 'running' || cmd.status === 'pending');
+  console.warn('listActiveCommandsSync is deprecated. Use listActiveCommands() instead.');
+  return [];
 }
 
 /**
@@ -454,53 +429,40 @@ export function listActiveCommandsSync(): EnhancedCommandExecution[] {
  */
 export async function listAllCommands(): Promise<EnhancedCommandExecution[]> {
   try {
-    // Get in-memory commands
-    const memoryCommands = Array.from(enhancedActiveCommands.values());
+    // Get active commands from persistent storage
+    const activeCommands = await commandLogger.getActiveCommands();
     
-    // Get persisted commands from logger
+    // Get command history from persistent storage
     const persistedHistory = await commandLogger.getCommandHistory(1000); // Get up to 1000 entries
     
-    // Convert persisted entries to EnhancedCommandExecution format
-    const persistedCommands: EnhancedCommandExecution[] = persistedHistory.map(entry => ({
-      id: entry.id,
-      paneId: entry.paneId,
-      command: entry.command,
-      status: entry.status as any,
-      startTime: new Date(entry.startTime),
-      endTime: entry.endTime ? new Date(entry.endTime) : undefined,
-      exitCode: entry.exitCode,
-      shellType: entry.shellType as 'bash' | 'zsh' | 'fish' | 'sh' | 'unknown' | undefined,
-      currentWorkingDirectory: entry.currentWorkingDirectory,
-      result: entry.result,
-      aborted: entry.aborted,
-      retryCount: entry.retryCount
-    }));
+    // Combine active and history commands, converting to EnhancedCommandExecution format
+    const allCommands = [
+      ...Object.values(activeCommands).map(entry => logEntryToCommand(entry)),
+      ...persistedHistory.map(entry => logEntryToCommand(entry))
+    ];
     
-    // Combine and deduplicate (prefer memory version over persisted)
-    const allCommands = new Map<string, EnhancedCommandExecution>();
-    
-    // Add persisted commands first
-    persistedCommands.forEach(cmd => allCommands.set(cmd.id, cmd));
-    
-    // Add memory commands (will override persisted if same ID)
-    memoryCommands.forEach(cmd => allCommands.set(cmd.id, cmd));
+    // Deduplicate by ID (prefer active over history)
+    const uniqueCommands = new Map<string, EnhancedCommandExecution>();
+    allCommands.forEach(cmd => uniqueCommands.set(cmd.id, cmd));
     
     // Sort by start time (newest first)
-    return Array.from(allCommands.values()).sort((a, b) => 
+    return Array.from(uniqueCommands.values()).sort((a, b) => 
       b.startTime.getTime() - a.startTime.getTime()
     );
   } catch (error) {
-    // Fallback to memory commands only if there's an error
+    // Fallback to empty array if there's an error
     console.error('Error reading persisted commands:', error);
-    return Array.from(enhancedActiveCommands.values());
+    return [];
   }
 }
 
 /**
- * Synchronous version for compatibility (only returns memory commands)
+ * Synchronous version for compatibility (deprecated - returns empty array)
+ * Use listAllCommands() instead
  */
 export function listAllCommandsSync(): EnhancedCommandExecution[] {
-  return Array.from(enhancedActiveCommands.values());
+  console.warn('listAllCommandsSync is deprecated. Use listAllCommands() instead.');
+  return [];
 }
 
 /**
@@ -509,61 +471,29 @@ export function listAllCommandsSync(): EnhancedCommandExecution[] {
 export async function cleanupOldCommands(maxAgeMinutes: number = 60): Promise<void> {
   const now = new Date();
   
-  // Clean up memory commands
-  for (const [id, command] of enhancedActiveCommands.entries()) {
-    if (command.endTime) {
-      const ageMinutes = (now.getTime() - command.endTime.getTime()) / (1000 * 60);
-      if (ageMinutes > maxAgeMinutes) {
-        enhancedActiveCommands.delete(id);
-      }
-    } else if (command.status === 'pending') {
-      // Handle stuck pending commands (older than 5 minutes)
-      const ageMinutes = (now.getTime() - command.startTime.getTime()) / (1000 * 60);
-      if (ageMinutes > 5) {
-        command.status = 'timeout';
-        command.endTime = new Date();
-        command.result = '[TIMEOUT] - Command stuck in pending state';
-        command.exitCode = 124;
-        
-        // Log the timeout
-        await commandLogger.logCommandUpdate(command);
-        enhancedActiveCommands.set(id, command);
-      }
-    }
-  }
-  
-  // Also cleanup persisted commands by updating stuck pending ones
+  // Get all active commands from persistent storage and handle stuck ones
   try {
-    const activeFromLogs = await commandLogger.getActiveCommands();
-    for (const [id, logEntry] of Object.entries(activeFromLogs)) {
-      if (logEntry.status === 'pending') {
-        const startTime = new Date(logEntry.startTime);
-        const ageMinutes = (now.getTime() - startTime.getTime()) / (1000 * 60);
-        
+    const activeCommands = await commandLogger.getActiveCommands();
+    
+    for (const [id, commandEntry] of Object.entries(activeCommands)) {
+      const command = logEntryToCommand(commandEntry);
+      
+      if (command.status === 'pending') {
+        // Handle stuck pending commands (older than 5 minutes)
+        const ageMinutes = (now.getTime() - command.startTime.getTime()) / (1000 * 60);
         if (ageMinutes > 5) {
-          // Convert to enhanced format and update
-          const updatedCommand: EnhancedCommandExecution = {
-            id: logEntry.id,
-            paneId: logEntry.paneId,
-            command: logEntry.command,
-            status: 'timeout',
-            startTime: startTime,
-            endTime: new Date(),
-            exitCode: 124,
-            shellType: logEntry.shellType as any,
-            currentWorkingDirectory: logEntry.currentWorkingDirectory,
-            result: '[TIMEOUT] - Command stuck in pending state for over 5 minutes',
-            aborted: logEntry.aborted,
-            retryCount: logEntry.retryCount
-          };
+          command.status = 'timeout';
+          command.endTime = new Date();
+          command.result = '[TIMEOUT] - Command stuck in pending state';
+          command.exitCode = 124;
           
-          // Update in logs
-          await commandLogger.logCommandUpdate(updatedCommand);
+          // Update in persistent storage
+          await commandLogger.logCommandUpdate(command);
         }
       }
     }
   } catch (error) {
-    console.error('Error cleaning up persisted commands:', error);
+    console.error('Error during cleanup:', error);
   }
 }
 

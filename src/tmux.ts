@@ -205,8 +205,8 @@ export async function splitPane(
 // Map to track ongoing command executions
 const activeCommands = new Map<string, CommandExecution>();
 
-const startMarkerText = 'TMUX_MCP_START';
-const endMarkerPrefix = "TMUX_MCP_DONE_";
+const startMarkerText = 'S_';
+const endMarkerPrefix = "E_";
 
 // Execute a command in a tmux pane and track its execution
 export async function executeCommand(paneId: string, command: string): Promise<string> {
@@ -240,34 +240,45 @@ export async function checkCommandStatus(commandId: string): Promise<CommandExec
 
   const content = await capturePaneContent(command.paneId, 1000);
 
-  // Find the last occurrence of the markers
-  const startIndex = content.lastIndexOf(startMarkerText);
-  const endIndex = content.lastIndexOf(endMarkerPrefix);
+  // Find the last occurrence of the markers (enhanced format with timestamps)
+  const startIndex = content.lastIndexOf('_S');
+  const endIndex = content.lastIndexOf('_E');
 
   if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
     command.result = "Command output could not be captured properly";
     return command;
   }
 
-  // Extract exit code from the end marker line
-  const endLine = content.substring(endIndex).split('\n')[0];
-  const endMarkerRegex = new RegExp(`${endMarkerPrefix}(\\d+)`);
-  const exitCodeMatch = endLine.match(endMarkerRegex);
+  // Find the start marker line end
+  const startMarkerEnd = content.indexOf('\n', startIndex);
+  if (startMarkerEnd === -1) {
+    command.result = "Could not find end of start marker";
+    return command;
+  }
 
+  // Find the end marker line start (go backwards from end marker to find line start)
+  let endMarkerStart = endIndex;
+  while (endMarkerStart > 0 && content[endMarkerStart - 1] !== '\n') {
+    endMarkerStart--;
+  }
+
+  // Extract output between the markers
+  const outputContent = content.substring(startMarkerEnd + 1, endMarkerStart).trim();
+  
+  // Look for exit code in the content after end marker
+  const exitCodeMatch = content.match(/exit_code:\s*(\d+)/);
+  
   if (exitCodeMatch) {
     const exitCode = parseInt(exitCodeMatch[1], 10);
 
     command.status = exitCode === 0 ? 'completed' : 'error';
     command.exitCode = exitCode;
-
-    // Extract output between the start and end markers
-    const outputStart = startIndex + startMarkerText.length;
-    const outputContent = content.substring(outputStart, endIndex).trim();
-
-    command.result = outputContent.substring(outputContent.indexOf('\n') + 1).trim();
+    command.result = outputContent;
 
     // Update in map
     activeCommands.set(commandId, command);
+  } else {
+    command.result = "Could not find exit code in output";
   }
 
   return command;

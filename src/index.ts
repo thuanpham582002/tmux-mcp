@@ -440,12 +440,41 @@ server.tool(
         maxRetries
       });
 
+      // Wait for command completion by polling status
+      const startTime = Date.now();
+      const pollInterval = 100; // Check every 100ms
+      
+      while (Date.now() - startTime < timeout) {
+        const status = await enhancedExecutor.getEnhancedCommandStatus(commandId);
+        
+        if (status && status.status !== 'pending') {
+          // Command completed, return full result
+          const resultText = status.status === 'completed' 
+            ? `Command completed successfully.\n\nResult:\n${status.result || '(no output)'}\n\nExit Code: ${status.exitCode || 0}\nStatus: ${status.status}`
+            : `Command failed.\n\nError:\n${status.result || '(no error details)'}\n\nExit Code: ${status.exitCode || 1}\nStatus: ${status.status}`;
+          
+          return {
+            content: [{
+              type: "text",
+              text: resultText
+            }],
+            isError: status.status !== 'completed'
+          };
+        }
+        
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+      
+      // Timeout reached
       return {
         content: [{
           type: "text",
-          text: `Enhanced command execution started.\n\nCommand ID: ${commandId}\n\nUse 'get-command-status' to check progress or 'cancel-command' to stop execution.`
-        }]
+          text: `Command timed out after ${timeout}ms.\n\nCommand ID: ${commandId}\n\nUse 'get-command-status' to check current status or 'cancel-command' to stop execution.`
+        }],
+        isError: true
       };
+      
     } catch (error) {
       return {
         content: [{
@@ -467,7 +496,7 @@ server.tool(
   },
   async ({ commandId }) => {
     try {
-      const command = enhancedExecutor.getEnhancedCommandStatus(commandId);
+      const command = await enhancedExecutor.getEnhancedCommandStatus(commandId);
 
       if (!command) {
         return {

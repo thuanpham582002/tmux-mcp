@@ -199,6 +199,26 @@ export class CommandLogger {
   }
 
   /**
+   * Get a single command by ID from persistent storage
+   */
+  async getCommandById(commandId: string): Promise<CommandLogEntry | null> {
+    try {
+      // First check active commands
+      const activeCommands = await this.getActiveCommands();
+      if (activeCommands[commandId]) {
+        return activeCommands[commandId];
+      }
+
+      // Then check command history
+      const historyCommands = await this.getCommandHistory(1000);
+      return historyCommands.find(cmd => cmd.id === commandId) || null;
+    } catch (error) {
+      console.error('Failed to get command by ID:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get formatted command list for display
    */
   async getFormattedActiveCommands(): Promise<string> {
