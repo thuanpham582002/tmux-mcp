@@ -7,6 +7,8 @@ import { z } from "zod";
 import * as tmux from "./tmux.js";
 import * as enhancedExecutor from "./enhanced-executor.js";
 import { commandLogger } from "./command-logger.js";
+import { TUIManager } from "./tui-manager.js";
+import { FzfIntegration } from "./fzf-integration.js";
 
 // Create MCP server
 const server = new McpServer({
@@ -925,8 +927,27 @@ async function handleCliCommand(command: string, args: string[], options: any) {
         
       case 'command-interactive':
       case 'interactive':
+      case 'tui':
       case 'i':
-        await handleInteractiveMode();
+        await handleModernTUI();
+        break;
+        
+      case 'interactive-legacy':
+      case 'legacy':
+        await handleInteractiveLegacyMode();
+        break;
+        
+      case 'fzf':
+      case 'fzf-active':
+        await handleFzfActiveCommands();
+        break;
+        
+      case 'fzf-history':
+        await handleFzfHistory();
+        break;
+        
+      case 'fzf-search':
+        await handleFzfSearch();
         break;
         
       case 'help':
@@ -1102,6 +1123,173 @@ async function handleCommandCleanup() {
   }
 }
 
+/**
+ * fzf-powered active commands interface
+ */
+async function handleFzfActiveCommands() {
+  try {
+    const fzf = new FzfIntegration();
+    
+    // Check if fzf is available
+    if (!await fzf.checkFzfAvailable()) {
+      console.error('❌ fzf is not available. Install it with: brew install fzf');
+      process.exit(1);
+    }
+    
+    console.log('🔄 Loading active commands...');
+    
+    // Check if we have any commands first
+    const activeCommands = await enhancedExecutor.listActiveCommands();
+    console.log(`Found ${activeCommands.length} active commands`);
+    
+    if (activeCommands.length === 0) {
+      console.log('📝 No active commands found.');
+      console.log('💡 Tip: Commands executed through MCP tools will appear here.');
+      console.log('🚀 Try the modern TUI instead: node build/index.js interactive');
+      return;
+    }
+    
+    const result = await fzf.showActiveCommands();
+    
+    if (result.cancelled) {
+      console.log('Operation cancelled.');
+      return;
+    }
+    
+    if (result.selected.length === 0) {
+      console.log('No commands selected.');
+      return;
+    }
+    
+    // Process selections
+    console.log(`\n✅ Selected ${result.selected.length} command(s):`);
+    for (const selection of result.selected) {
+      const commandId = fzf.parseSelection(selection);
+      console.log(`  • ${selection}`);
+      console.log(`    Command ID: ${commandId}`);
+    }
+    
+  } catch (error) {
+    console.error('Error in fzf active commands:', error);
+    process.exit(1);
+  }
+}
+
+/**
+ * fzf-powered command history interface
+ */
+async function handleFzfHistory() {
+  try {
+    const fzf = new FzfIntegration();
+    
+    // Check if fzf is available
+    if (!await fzf.checkFzfAvailable()) {
+      console.error('❌ fzf is not available. Install it with: brew install fzf');
+      process.exit(1);
+    }
+    
+    console.log('📚 Loading command history...');
+    
+    // Check if we have any commands first
+    const historyCommands = await enhancedExecutor.listAllCommands();
+    if (historyCommands.length === 0) {
+      console.log('📝 No command history found. Try running some commands first.');
+      console.log('   Use: node build/index.js execute-command-enhanced <pane-id> <command>');
+      return;
+    }
+    
+    const result = await fzf.showCommandHistory();
+    
+    if (result.cancelled) {
+      console.log('Operation cancelled.');
+      return;
+    }
+    
+    if (result.selected.length === 0) {
+      console.log('No command selected.');
+      return;
+    }
+    
+    // Show selected command details
+    const selection = result.selected[0];
+    const commandId = fzf.parseSelection(selection);
+    
+    const searchCommands = await enhancedExecutor.listAllCommands();
+    const command = searchCommands.find(cmd => cmd.id.startsWith(commandId));
+    
+    if (command) {
+      console.log('\n📋 Command Details:');
+      console.log('='.repeat(50));
+      console.log(`Command: ${command.command}`);
+      console.log(`ID:      ${command.id}`);
+      console.log(`Status:  ${command.status.toUpperCase()}`);
+      console.log(`Pane:    ${command.paneId}`);
+      if (command.shellType) console.log(`Shell:   ${command.shellType}`);
+      if (command.currentWorkingDirectory) console.log(`Dir:     ${command.currentWorkingDirectory}`);
+      if (command.exitCode !== undefined) console.log(`Exit:    ${command.exitCode}`);
+      console.log(`Started: ${new Date(command.startTime).toLocaleString()}`);
+      if (command.endTime) console.log(`Ended:   ${new Date(command.endTime).toLocaleString()}`);
+      
+      if (command.result) {
+        console.log('\n--- Output ---');
+        console.log(command.result.length > 1000 
+          ? command.result.substring(0, 1000) + '\n... (truncated)'
+          : command.result
+        );
+      }
+    } else {
+      console.log('❌ Command not found');
+    }
+    
+  } catch (error) {
+    console.error('Error in fzf history:', error);
+    process.exit(1);
+  }
+}
+
+/**
+ * fzf-powered smart search interface
+ */
+async function handleFzfSearch() {
+  try {
+    await commandLogger.initialize();
+    
+    const fzf = new FzfIntegration();
+    
+    // Check if fzf is available
+    if (!await fzf.checkFzfAvailable()) {
+      console.error('❌ fzf is not available. Install it with: brew install fzf');
+      process.exit(1);
+    }
+    
+    console.log('🔍 Starting smart search...');
+    
+    const result = await fzf.smartSearch();
+    
+    if (result.cancelled) {
+      console.log('Search cancelled.');
+      return;
+    }
+    
+    if (result.selected.length === 0) {
+      console.log('No results found.');
+      return;
+    }
+    
+    // Display search results
+    console.log(`\n🎯 Search Results (${result.selected.length} found):`);
+    console.log('='.repeat(60));
+    
+    for (const selection of result.selected) {
+      console.log(`  ${selection}`);
+    }
+    
+  } catch (error) {
+    console.error('Error in fzf search:', error);
+    process.exit(1);
+  }
+}
+
 async function main() {
   try {
     const { values, positionals } = parseArgs({
@@ -1151,9 +1339,49 @@ async function main() {
 }
 
 /**
- * Interactive command management mode
+ * Modern TUI command management mode
  */
-async function handleInteractiveMode() {
+async function handleModernTUI() {
+  // Check if we're in a TTY or tmux environment
+  const isTmuxEnvironment = !!process.env.TMUX;
+  if (!process.stdin.isTTY && !isTmuxEnvironment) {
+    console.log('Interactive mode requires a TTY or tmux environment.');
+    return;
+  }
+
+  try {
+    await commandLogger.initialize();
+    
+    const tui = new TUIManager({
+      title: 'TMUX MCP - Advanced Command Manager',
+      refreshInterval: 1000,
+      enableMouse: false,
+      vimMode: true
+    });
+    
+    await tui.start();
+    
+    // Setup cleanup on exit
+    process.on('SIGINT', () => {
+      tui.cleanup();
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+      tui.cleanup();
+      process.exit(0);
+    });
+    
+  } catch (error) {
+    console.error('Error starting modern TUI:', error);
+    process.exit(1);
+  }
+}
+
+/**
+ * Legacy interactive command management mode (backwards compatibility)
+ */
+async function handleInteractiveLegacyMode() {
   console.log('\x1b[2J\x1b[H'); // Clear screen
   console.log('🎛️  TMUX MCP - Interactive Command Manager\n');
   
