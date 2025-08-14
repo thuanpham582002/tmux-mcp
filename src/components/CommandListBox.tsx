@@ -10,6 +10,11 @@ interface CommandListBoxProps {
   selectedCommands: Map<string, boolean>;
   scrollOffset: number;
   currentMode: InteractionMode;
+  copySelection?: {
+    target: 'command' | 'output' | 'full' | 'metadata';
+    commandIds: string[];
+    state: 'idle' | 'selecting' | 'selected' | 'copying' | 'copied';
+  };
 }
 
 export const CommandListBox: React.FC<CommandListBoxProps> = ({
@@ -17,7 +22,8 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
   selectedIndex,
   selectedCommands,
   scrollOffset,
-  currentMode
+  currentMode,
+  copySelection
 }) => {
   const getStatusIcon = (status: string): string => {
     switch (status) {
@@ -129,6 +135,24 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
         inverse = true;
       } else if (isVisuallySelected && currentMode === 'visual') {
         color = 'yellow';
+      } else if (currentMode === 'copy' && copySelection && copySelection.commandIds.includes(cmd.id)) {
+        // Copy mode highlighting based on target
+        switch (copySelection.target) {
+          case 'command':
+            color = 'blue';
+            break;
+          case 'output':
+            color = 'green';
+            break;
+          case 'full':
+            color = 'yellow';
+            break;
+          case 'metadata':
+            color = 'cyan';
+            break;
+          default:
+            color = 'blue';
+        }
       }
       
       rows.push(

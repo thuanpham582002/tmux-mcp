@@ -30,6 +30,12 @@ interface InputHandlers {
   cancelCurrentCommand: () => Promise<void>;
   refreshData: () => Promise<void>;
   
+  // Copy mode management
+  enterCopyMode: () => void;
+  setCopyTarget: (target: any) => void; // Using any for CopyTarget to avoid circular import
+  cycleCopyTarget: (direction: 'next' | 'previous') => void;
+  executeCopy: () => Promise<void>;
+  
   // System
   quit: () => void;
 }
@@ -44,8 +50,8 @@ export const useInputHandler = ({
   handlers
 }: UseInputHandlerOptions): void => {
   useInput((input, key) => {
-    // Handle escape key - always available to exit modes
-    if (key.escape) {
+    // Handle backspace key - always available to exit modes (avoids tmux Esc key conflict)
+    if (key.backspace) {
       if (currentMode !== 'normal') {
         handlers.exitCurrentMode();
       }
@@ -70,6 +76,9 @@ export const useInputHandler = ({
         break;
       case 'visual':
         handleVisualMode(input, key, handlers);
+        break;
+      case 'copy':
+        handleCopyMode(input, key, handlers);
         break;
       case 'command':
       case 'search':
@@ -144,6 +153,9 @@ const handleNormalMode = (input: string, key: any, handlers: InputHandlers) => {
   switch (input) {
     case 'v':
       handlers.enterVisualMode();
+      break;
+    case 'y':
+      handlers.enterCopyMode();
       break;
     case ':':
       handlers.enterCommandMode();
@@ -241,10 +253,92 @@ const handleVisualMode = (input: string, key: any, handlers: InputHandlers) => {
         handlers.cancelCurrentCommand();
       }
       break;
+    case 'y':
+      handlers.enterCopyMode();
+      break;
   }
   
   // Enter key for action
   if (key.return) {
     // TODO: Implement action on selected items
+  }
+};
+
+const handleCopyMode = (input: string, key: any, handlers: InputHandlers) => {
+  // Navigation still works in copy mode
+  if (key.ctrl) {
+    switch (input) {
+      case 'u': // Ctrl+U - Half page up
+        handlers.halfPageUp();
+        return;
+      case 'd': // Ctrl+D - Half page down
+        handlers.halfPageDown();
+        return;
+      case 'f': // Ctrl+F - Full page forward
+        handlers.pageDown();
+        return;
+      case 'b': // Ctrl+B - Full page backward
+        handlers.pageUp();
+        return;
+      case 'e': // Ctrl+E - Scroll down one line
+        handlers.lineDown();
+        return;
+      case 'y': // Ctrl+Y - Scroll up one line
+        handlers.lineUp();
+        return;
+    }
+  }
+  
+  // Basic navigation
+  switch (input) {
+    case 'j':
+      handlers.navigateDown();
+      break;
+    case 'k':
+      handlers.navigateUp();
+      break;
+    case 'G':
+      handlers.goToBottom();
+      break;
+    case 'g':
+      handlers.goToTop();
+      break;
+  }
+  
+  // Arrow key navigation
+  if (key.upArrow) {
+    handlers.navigateUp();
+  } else if (key.downArrow) {
+    handlers.navigateDown();
+  } else if (key.leftArrow) {
+    handlers.cycleCopyTarget('previous');
+  } else if (key.rightArrow) {
+    handlers.cycleCopyTarget('next');
+  }
+  
+  // Copy target selection
+  switch (input) {
+    case 'c':
+      handlers.setCopyTarget('command');
+      break;
+    case 'o':
+      handlers.setCopyTarget('output');
+      break;
+    case 'm':
+      handlers.setCopyTarget('metadata');
+      break;
+    case 'f':
+      handlers.setCopyTarget('full');
+      break;
+  }
+  
+  // Tab to cycle copy targets
+  if (key.tab) {
+    handlers.cycleCopyTarget('next');
+  }
+  
+  // Execute copy
+  if (key.return || input === ' ') {
+    handlers.executeCopy();
   }
 };

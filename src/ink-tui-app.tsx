@@ -5,18 +5,30 @@ import { CommandListBox } from './components/CommandListBox.js';
 import { PreviewPaneBox } from './components/PreviewPaneBox.js';
 import { StatusBarBox } from './components/StatusBarBox.js';
 import { CommandInputModal } from './components/CommandInputModal.js';
+import { CopyModeOverlay } from './components/CopyModeOverlay.js';
 import { usePolling } from './hooks/usePolling.js';
 import { useScrolling } from './hooks/useScrolling.js';
 import { useInputHandler } from './hooks/useInputHandler.js';
 import * as enhancedExecutor from './enhanced-executor.js';
+import { copyWithFallback } from './utils/clipboard.js';
+import { formatContent, getNextCopyTarget, getPreviousCopyTarget, getCopyTargetDescription } from './utils/copyFormatter.js';
 
 export type ViewMode = 'dashboard' | 'active' | 'history' | 'logs' | 'watch';
-export type InteractionMode = 'normal' | 'visual' | 'command' | 'search';
+export type InteractionMode = 'normal' | 'visual' | 'command' | 'search' | 'copy';
 
 export interface CommandSelection {
   id: string;
   selected: boolean;
   index: number;
+}
+
+export type CopyTarget = 'command' | 'output' | 'full' | 'metadata';
+export type CopyModeState = 'idle' | 'selecting' | 'selected' | 'copying' | 'copied';
+
+export interface CopySelection {
+  target: CopyTarget;
+  commandIds: string[];
+  state: CopyModeState;
 }
 
 export interface InkTUIOptions {
@@ -43,6 +55,14 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
   const [filterText, setFilterText] = useState('');
   const [commands, setCommands] = useState<enhancedExecutor.EnhancedCommandExecution[]>([]);
   const [showCommandInput, setShowCommandInput] = useState(false);
+  
+  // Copy mode state
+  const [copySelection, setCopySelection] = useState<CopySelection>({
+    target: 'command',
+    commandIds: [],
+    state: 'idle'
+  });
+  const [copyMessage, setCopyMessage] = useState<string>('');
   
   // Real-time data polling
   usePolling(async () => {
@@ -164,6 +184,8 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
       setShowCommandInput(false);
       setFilterText('');
       setSelectedCommands(new Map());
+      setCopySelection({ target: 'command', commandIds: [], state: 'idle' });
+      setCopyMessage('');
     },
     
     // View management
@@ -213,6 +235,58 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
       }
     },
     
+    // Copy mode management
+    enterCopyMode: () => {
+      const currentCommand = filteredCommands[selectedIndex];
+      if (currentCommand) {
+        setCurrentMode('copy');
+        setCopySelection({
+          target: 'command',
+          commandIds: selectedCommands.size > 0 
+            ? Array.from(selectedCommands.keys())
+            : [currentCommand.id],
+          state: 'selecting'
+        });
+        setCopyMessage('');
+      }
+    },
+    
+    setCopyTarget: (target: CopyTarget) => {
+      setCopySelection(prev => ({ ...prev, target }));
+    },
+    
+    cycleCopyTarget: (direction: 'next' | 'previous') => {
+      setCopySelection(prev => ({
+        ...prev,
+        target: direction === 'next' 
+          ? getNextCopyTarget(prev.target)
+          : getPreviousCopyTarget(prev.target)
+      }));
+    },
+    
+    executeCopy: async () => {
+      const commandsToCopy = filteredCommands.filter(cmd => 
+        copySelection.commandIds.includes(cmd.id)
+      );
+      
+      if (commandsToCopy.length > 0) {
+        setCopySelection(prev => ({ ...prev, state: 'copying' }));
+        
+        const content = formatContent(commandsToCopy, copySelection.target);
+        const result = await copyWithFallback(content, getCopyTargetDescription(copySelection.target));
+        
+        setCopySelection(prev => ({ ...prev, state: 'copied' }));
+        setCopyMessage(result.message || 'Copied successfully');
+        
+        // Auto-exit copy mode after 1.5 seconds
+        setTimeout(() => {
+          setCurrentMode('normal');
+          setCopySelection({ target: 'command', commandIds: [], state: 'idle' });
+          setCopyMessage('');
+        }, 1500);
+      }
+    },
+    
     quit: () => {
       // Clean exit using Ink's built-in exit function
       exit();
@@ -255,6 +329,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
           selectedCommands={selectedCommands}
           scrollOffset={scrollOffset}
           currentMode={currentMode}
+          copySelection={currentMode === 'copy' ? copySelection : undefined}
         />
         
         <PreviewPaneBox 
@@ -277,6 +352,14 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
             inputHandlers.exitCurrentMode();
           }}
           onCancel={inputHandlers.exitCurrentMode}
+        />
+      )}
+      
+      {currentMode === 'copy' && (
+        <CopyModeOverlay
+          copySelection={copySelection}
+          copyMessage={copyMessage}
+          commandCount={filteredCommands.length}
         />
       )}
     </Box>
