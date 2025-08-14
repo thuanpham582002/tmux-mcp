@@ -68,13 +68,22 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
 
   // Calculate visible commands based on terminal height but with safety limits
   const terminalHeight = process.stdout.rows || 24;
-  // Account for header (3) + status bar (3) + borders and padding (~4) = 10 total reserved
-  const availableHeight = Math.max(5, terminalHeight - 10);
+  // Header = 3 lines (border + padding + content)
+  // Status bar = 3 lines (border + padding + content)  
+  // Table header = 2 lines (header + divider)
+  // Total reserved = 8 lines, but add 2 extra lines buffer to prevent any overlap
+  const reservedLines = 10;
+  const availableHeight = Math.max(3, terminalHeight - reservedLines);
   const maxVisibleCommands = Math.min(availableHeight, 50); // Cap at 50 to prevent performance issues
   
   const visibleCommands = commands.slice(scrollOffset, scrollOffset + maxVisibleCommands);
 
   const commandRows = useMemo(() => {
+    // Calculate available width for command list (half of terminal width minus borders and padding)
+    const terminalWidth = (process.stdout.columns || 80) - 4; // Account for borders and padding
+    const listWidth = Math.floor(terminalWidth * 0.6); // 60% of terminal width for list
+    const maxLineWidth = Math.max(50, Math.min(listWidth, 100)); // Between 50-100 chars
+    
     if (visibleCommands.length === 0) {
       return [
         <Text key="empty" color="gray">
@@ -85,15 +94,11 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
 
     const rows = [];
     
-    // Table header
+    // Responsive table header without horizontal divider line
+    const commandWidth = Math.max(15, Math.floor(maxLineWidth * 0.35));
     rows.push(
-      <Text key="header" bold>
-        Status │ Command                    │ Pane │ Duration │ Started    │ Shell
-      </Text>
-    );
-    rows.push(
-      <Text key="divider">
-        {'─'.repeat(75)}
+      <Text key="header" bold color="cyan">
+        Status │ Command{' '.repeat(Math.max(0, commandWidth - 7))} │ Pane │ Duration │ Started   
       </Text>
     );
 
@@ -104,13 +109,18 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
       const isVisuallySelected = selectedCommands.has(cmd.id);
       
       const statusIcon = getStatusIcon(cmd.status);
-      const command = truncateText(cmd.command, 25);
-      const pane = cmd.paneId || '?';
-      const duration = formatDuration(cmd);
-      const started = formatStartTime(cmd.startTime);
-      const shell = cmd.shellType || '?';
+      const command = truncateText(cmd.command, commandWidth);
+      const pane = (cmd.paneId || '?').substring(0, 4).padEnd(4);
+      const duration = formatDuration(cmd).substring(0, 8).padEnd(8);
+      const started = formatStartTime(cmd.startTime).substring(0, 9).padEnd(9);
       
-      let line = `${statusIcon} │ ${command} │ ${pane.padEnd(4)} │ ${duration.padEnd(8)} │ ${started.padEnd(10)} │ ${shell}`;
+      // Create responsive line that fits within terminal width
+      let line = `${statusIcon} │ ${command} │ ${pane} │ ${duration} │ ${started}`;
+      
+      // Ensure line doesn't exceed max width
+      if (line.length > maxLineWidth) {
+        line = line.substring(0, maxLineWidth - 3) + '...';
+      }
       
       let color: string | undefined;
       let inverse = false;
@@ -132,15 +142,15 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
       );
     });
 
-    // Fill remaining space with empty lines to occupy full terminal height
-    const terminalHeight = process.stdout.rows || 24;
+    // Fill remaining space with empty lines but don't exceed terminal bounds
+    const terminalHeight = (process.stdout.rows || 24) - 1;
     const usedRows = rows.length;
-    const availableRows = Math.max(0, terminalHeight - 6); // Account for header, status bar
+    const availableRows = Math.max(0, terminalHeight - 8); // Account for header, status bar with extra buffer
     
     for (let i = usedRows; i < availableRows; i++) {
       rows.push(
         <Text key={`empty-${i}`}>
-          {' '.repeat(75)}
+          {' '.repeat(Math.min(maxLineWidth, 10))}
         </Text>
       );
     }
@@ -152,7 +162,7 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
     <Box 
       width="60%"
       flexDirection="column"
-      borderStyle="single"
+      borderStyle="round"
       borderColor="white"
       paddingX={1}
       flexGrow={1}

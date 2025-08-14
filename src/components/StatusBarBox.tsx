@@ -12,13 +12,13 @@ export const StatusBarBox: React.FC<StatusBarBoxProps> = ({
   const getKeyHelp = (): string => {
     switch (currentMode) {
       case 'visual':
-        return 'j/k:Nav │ Space:Toggle │ c:Cancel Selected │ d:Delete │ Esc:Normal │ Enter:Action';
+        return 'j/k:Nav │ Space:Toggle │ c:Cancel │ Esc:Normal';
       case 'command':
-        return 'Enter:Execute │ Esc:Cancel │ :kill :cleanup :filter :help';
+        return 'Enter:Execute │ Esc:Cancel';
       case 'search':
-        return 'Type to search │ Enter:Apply │ Esc:Clear │ Ctrl-R:Regex';
+        return 'Type to search │ Enter:Apply │ Esc:Clear';
       default:
-        return 'j/k:Nav │ Ctrl+U/D:Half-page │ Ctrl+F/B:Full-page │ c:Cancel │ r:Refresh │ /:Search │ v:Visual │ q:Quit';
+        return 'j/k:Nav │ Ctrl+U/D:Half │ Ctrl+F/B:Full │ c:Cancel │ r:Refresh │ /:Search │ v:Visual │ q:Quit';
     }
   };
 
@@ -27,8 +27,9 @@ export const StatusBarBox: React.FC<StatusBarBoxProps> = ({
       height={3}
       paddingX={1}
       paddingY={1}
-      borderStyle="single"
+      borderStyle="round"
       borderColor="gray"
+      overflow="hidden"
     >
       <Text color="white">
         {getKeyHelp()}

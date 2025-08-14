@@ -38,10 +38,11 @@ export const PreviewPaneBox: React.FC<PreviewPaneBoxProps> = ({
       <Box 
         width="40%"
         flexDirection="column"
-        borderStyle="single"
+        borderStyle="round"
         borderColor="white"
         paddingX={1}
         paddingY={1}
+        overflow="hidden"
       >
         <Text color="gray">No command selected</Text>
       </Box>
@@ -93,19 +94,22 @@ export const PreviewPaneBox: React.FC<PreviewPaneBoxProps> = ({
   if (selectedCommand.result) {
     lines.push(
       <Text key="blank2"> </Text>,
-      <Text key="output-title" bold>Output:</Text>,
-      <Text key="output-divider">{'─'.repeat(40)}</Text>
+      <Text key="output-title" bold color="cyan">Output:</Text>
     );
     
-    // Truncate long output for preview
-    const output = selectedCommand.result.length > 800 
-      ? selectedCommand.result.substring(0, 800) + '\n... (truncated)'
+    // Truncate long output for preview and fit in terminal width
+    const maxWidth = Math.floor(((process.stdout.columns || 80) * 0.4) - 4); // 40% width minus padding
+    const output = selectedCommand.result.length > 400 
+      ? selectedCommand.result.substring(0, 400) + '\n... (truncated)'
       : selectedCommand.result;
     
-    // Split output into lines for proper display
-    const outputLines = output.split('\n');
+    // Split output into lines and truncate each line to fit
+    const outputLines = output.split('\n').slice(0, 10); // Limit to 10 lines
     outputLines.forEach((line, index) => {
-      lines.push(<Text key={`output-${index}`}>{line}</Text>);
+      const truncatedLine = line.length > maxWidth 
+        ? line.substring(0, maxWidth - 3) + '...'
+        : line;
+      lines.push(<Text key={`output-${index}`}>{truncatedLine}</Text>);
     });
   }
 
@@ -113,11 +117,12 @@ export const PreviewPaneBox: React.FC<PreviewPaneBoxProps> = ({
     <Box 
       width="40%"
       flexDirection="column"
-      borderStyle="single"
+      borderStyle="round"
       borderColor="white"
       paddingX={1}
       paddingY={1}
       flexGrow={1}
+      overflow="hidden"
     >
       {lines}
     </Box>

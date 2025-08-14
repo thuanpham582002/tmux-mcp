@@ -91,6 +91,10 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
     }
   }, [filteredCommands.length, selectedIndex]);
   
+  // Calculate terminal dimensions first
+  const terminalHeight = (process.stdout.rows || 24) - 1; // Reserve 1 line for safety
+  const terminalWidth = (process.stdout.columns || 80) - 1; // Reserve 1 column for safety
+  
   // Scrolling functionality with vim keybindings
   const {
     scrollOffset,
@@ -106,7 +110,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
     handleLineDown
   } = useScrolling({
     totalItems: filteredCommands.length,
-    visibleItems: Math.max(5, Math.min((process.stdout.rows || 24) - 10, 50)), // Dynamic based on terminal size
+    visibleItems: Math.max(3, Math.min(terminalHeight - 10, 50)), // Match CommandListBox calculation with extra buffer
     selectedIndex,
     onSelectedIndexChange: setSelectedIndex
   });
@@ -210,6 +214,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
     },
     
     quit: () => {
+      // Clean exit using Ink's built-in exit function
       exit();
     }
   };
@@ -228,14 +233,12 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
     cmd.status === 'running' || cmd.status === 'pending'
   ).length;
   
-  const terminalHeight = process.stdout.rows || 24;
-  const terminalWidth = process.stdout.columns || 80;
-  
   return (
     <Box 
       flexDirection="column" 
       width={terminalWidth}
       height={terminalHeight}
+      overflow="hidden"
     >
       <HeaderBox 
         currentView={currentView}

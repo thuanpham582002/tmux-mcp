@@ -38,19 +38,19 @@ export const HeaderBox: React.FC<HeaderBoxProps> = ({
     }
   };
 
-  const filterInfo = filterText ? ` 🔍 Filter: ${filterText}` : '';
+  const filterInfo = filterText ? ` 🔍 ${filterText}` : '';
   
-  const header = 
-    `TMUX MCP Command Manager │ 🔄 ${activeCount} active │ ` +
-    `📚 ${totalCount} total │${filterInfo} │ ${getModeInfo()}`;
+  // Compact header that fits in terminal width
+  const header = `TMUX MCP │ 🔄 ${activeCount} │ 📚 ${totalCount}${filterInfo} │ ${getModeInfo()}`;
 
   return (
     <Box 
       height={3}
       paddingX={1}
       paddingY={1}
-      borderStyle="single" 
+      borderStyle="round" 
       borderColor="blue"
+      overflow="hidden"
     >
       <Text color="white" bold>
         {header}
