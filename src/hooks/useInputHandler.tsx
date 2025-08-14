@@ -50,12 +50,15 @@ export const useInputHandler = ({
   handlers
 }: UseInputHandlerOptions): void => {
   useInput((input, key) => {
-    // Handle backspace key - always available to exit modes (avoids tmux Esc key conflict)
+    // Handle backspace key - mode-specific behavior (avoids tmux Esc key conflict)
     if (key.backspace) {
-      if (currentMode !== 'normal') {
+      // Only exit these specific modes with backspace
+      if (currentMode === 'copy' || currentMode === 'command' || currentMode === 'search') {
         handlers.exitCurrentMode();
+        return;
       }
-      return;
+      // In visual mode, backspace becomes a navigation key - handled in handleVisualMode
+      // In normal mode, backspace does nothing (consistent with vim)
     }
     
     // Handle quit commands
@@ -188,6 +191,12 @@ const handleNormalMode = (input: string, key: any, handlers: InputHandlers) => {
 
 const handleVisualMode = (input: string, key: any, handlers: InputHandlers) => {
   // In visual mode, we still allow navigation and vim scrolling
+  
+  // Handle backspace as navigation in visual mode (vim-like behavior)
+  if (key.backspace) {
+    handlers.navigateUp(); // Backspace moves up like 'k'
+    return;
+  }
   
   // Advanced vim scrolling keybindings work in visual mode too
   if (key.ctrl) {
