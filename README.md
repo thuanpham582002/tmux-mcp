@@ -59,6 +59,7 @@ The MCP server needs to know the shell only when executing commands, to properly
 
 ## Available Tools
 
+### Basic Tools
 - `list-sessions` - List all active tmux sessions
 - `find-session` - Find a tmux session by name
 - `list-windows` - List windows in a tmux session
@@ -66,6 +67,21 @@ The MCP server needs to know the shell only when executing commands, to properly
 - `capture-pane` - Capture content from a tmux pane
 - `create-session` - Create a new tmux session
 - `create-window` - Create a new window in a tmux session
+- `split-pane` - Split a tmux pane horizontally or vertically
+- `send-keys-raw` - Send raw keys to a tmux pane (advanced)
+- `get-hierarchy` - Get complete tmux hierarchy overview
+
+### Command Execution (Original)
 - `execute-command` - Execute a command in a tmux pane
 - `get-command-result` - Get the result of an executed command
+
+### 🚀 Enhanced Command Execution (NEW!)
+- `execute-command-enhanced` - Execute commands with shell detection, trap logic, and cancellation support
+- `get-command-status` - Get detailed status of enhanced commands
+- `cancel-command` - Cancel running commands
+- `list-active-commands` - List all currently running commands
+- `list-all-commands` - List complete command history
+- `cleanup-commands` - Clean up old command history
+
+> **Enhanced Features**: The new enhanced tools provide better shell detection, proper trap mechanisms, command cancellation, and detailed monitoring. See [ENHANCED_FEATURES.md](./ENHANCED_FEATURES.md) for detailed documentation.
 
