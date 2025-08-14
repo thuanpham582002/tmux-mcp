@@ -106,7 +106,7 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
     handleLineDown
   } = useScrolling({
     totalItems: filteredCommands.length,
-    visibleItems: process.stdout.rows - 6, // Account for header, status bar, borders
+    visibleItems: Math.max(5, Math.min((process.stdout.rows || 24) - 10, 50)), // Dynamic based on terminal size
     selectedIndex,
     onSelectedIndexChange: setSelectedIndex
   });

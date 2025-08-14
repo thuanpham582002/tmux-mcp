@@ -117,6 +117,7 @@ export const PreviewPaneBox: React.FC<PreviewPaneBoxProps> = ({
       borderColor="white"
       paddingX={1}
       paddingY={1}
+      flexGrow={1}
     >
       {lines}
     </Box>

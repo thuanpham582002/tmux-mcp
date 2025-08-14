@@ -66,10 +66,13 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
     }
   };
 
-  // Calculate visible commands based on terminal height
+  // Calculate visible commands based on terminal height but with safety limits
   const terminalHeight = process.stdout.rows || 24;
-  const availableHeight = terminalHeight - 6; // Account for header, status bar, borders
-  const visibleCommands = commands.slice(scrollOffset, scrollOffset + availableHeight);
+  // Account for header (3) + status bar (3) + borders and padding (~4) = 10 total reserved
+  const availableHeight = Math.max(5, terminalHeight - 10);
+  const maxVisibleCommands = Math.min(availableHeight, 50); // Cap at 50 to prevent performance issues
+  
+  const visibleCommands = commands.slice(scrollOffset, scrollOffset + maxVisibleCommands);
 
   const commandRows = useMemo(() => {
     if (visibleCommands.length === 0) {
@@ -135,11 +138,11 @@ export const CommandListBox: React.FC<CommandListBoxProps> = ({
   return (
     <Box 
       width="60%"
-      flexGrow={1}
       flexDirection="column"
       borderStyle="single"
       borderColor="white"
       paddingX={1}
+      flexGrow={1}
     >
       {commandRows}
     </Box>
