@@ -30,10 +30,5 @@ module.exports = {
   testTimeout: 30000,
   verbose: true,
   // Force CommonJS for all modules
-  extensionsToTreatAsEsm: [],
-  globals: {
-    'ts-jest': {
-      useESM: false
-    }
-  }
+  extensionsToTreatAsEsm: []
 };
