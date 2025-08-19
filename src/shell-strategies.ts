@@ -237,8 +237,13 @@ export class ShellContext {
 }
 
 /**
- * Escape shell string for safe execution - helper function
+ * Escape shell string for safe execution - EXACT copy from tabby-mcp
  */
-export function escapeShellString(str: string): string {
-  return str.replace(/'/g, "'\"'\"'");
+export function escapeShellString(raw: string): string {
+  return raw
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/`/g, '\\`')
+    .replace(/\n/g, '\\n');
 }

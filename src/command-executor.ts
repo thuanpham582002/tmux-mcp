@@ -27,7 +27,6 @@ export class CommandExecutor {
 
   /**
    * Execute shell detection only (without running the command yet)
-   * EXACT copy from tabby-mcp commandExecutor.ts lines 20-54
    */
   async executeShellDetection(paneId: string, command: string, startMarker: string): Promise<{ shellDetectionResult: any; attempts: number; maxAttempts: number }> {
     const detectShellScript = this.shellContext.getShellDetectionScript();
@@ -38,23 +37,40 @@ export class CommandExecutor {
     
     const trimmedCommand = command.endsWith('\n') ? command.slice(0, -1) : command;
     
-    // Send command with shell detection (same as enhanced tool) - EXACT tabby-mcp format
+    // Send command with shell detection
     if (command.includes('\n')) {
+      
+      // Use exact tabby-mcp block format
       const multiLineScript = `stty -echo;read ds;eval "$ds";read ss;eval "$ss";stty echo; {
 echo "${startMarker}"
 ${trimmedCommand}
 }`;
-      await tmux.executeTmux(`send-keys -t '${paneId}' '${multiLineScript.replace(/'/g, "'\\''")}' Enter`);
+      
+      // Send line by line to avoid escaping issues with newlines in tmux
+      const scriptLines = multiLineScript.split('\n');
+      for (let i = 0; i < scriptLines.length; i++) {
+        const line = scriptLines[i];
+        if (i === 0) {
+          // First line - send with continuation
+          await tmux.executeTmux(`send-keys -t '${paneId}' '${line}' Enter`);
+        } else if (i === scriptLines.length - 1) {
+          // Last line - send without continuation
+          await tmux.executeTmux(`send-keys -t '${paneId}' '${line}' Enter`);
+        } else {
+          // Middle lines - send normally
+          await tmux.executeTmux(`send-keys -t '${paneId}' '${line}' Enter`);
+        }
+      }
     } else {
       const singleLineScript = `stty -echo;read ds;eval "$ds";read ss;eval "$ss";stty echo;echo "${startMarker}";\\`;
-      await tmux.executeTmux(`send-keys -t '${paneId}' '${singleLineScript.replace(/'/g, "'\\''")}' Enter`);
-      await tmux.executeTmux(`send-keys -t '${paneId}' '${trimmedCommand.replace(/'/g, "'\\''")}' Enter`);
+      await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(singleLineScript)}" Enter`);
+      await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(trimmedCommand)}" Enter`);
     }
 
-    // Send shell detection script with proper escaping
-    await tmux.executeTmux(`send-keys -t '${paneId}' "${detectShellScript.replace(/"/g, '\\"')}" Enter`);
+    // Send shell detection script with proper escaping 
+    await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(detectShellScript)}" Enter`);
 
-    // Wait for shell detection - EXACT tabby-mcp logic
+    // Wait for shell detection  
     let attempts = 0;
     const maxAttempts = 50;
     let shellDetectionResult: { shellType: string; currentWorkingDirectory: string; systemInfo?: string } | null = null;
@@ -71,23 +87,20 @@ ${trimmedCommand}
 
   /**
    * Send setup script after shell detection
-   * EXACT copy from tabby-mcp commandExecutor.ts lines 59-66
    */
   async sendSetupScript(paneId: string, shellDetectionResult: any, startMarker: string, endMarker: string): Promise<void> {
     if (shellDetectionResult) {
-      // Send setup script - EXACT tabby-mcp logic
+      // Send setup script 
       const shellStrategy = this.shellContext.getStrategy(shellDetectionResult.shellType ?? 'unknown');
       const setupScript = shellStrategy.getSetupScript(startMarker, endMarker);
       
-      // Simple setup test: just echo endMarker after command completes
-      const simpleSetup = `echo "Simple setup works"`;
-      await tmux.executeTmux(`send-keys -t '${paneId}' "${simpleSetup}" Enter`);
+      // Send actual trap setup script 
+      await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(setupScript)}" Enter`);
     }
   }
 
   /**
    * Monitor command execution and wait for completion
-   * EXACT copy from tabby-mcp commandExecutor.ts lines 71-142
    */
   async waitForCommandCompletion(
     paneId: string,
@@ -100,7 +113,7 @@ ${trimmedCommand}
     let commandFinished = false;
     let exitCode: number | null = null;
     
-    // Add timeout protection to prevent infinite waiting - EXACT tabby-mcp
+    // Add timeout protection to prevent infinite waiting 
     const startTime = Date.now();
     const timeout = 300000; // 5 minutes timeout
 
@@ -116,11 +129,11 @@ ${trimmedCommand}
       // Get terminal buffer
       const textAfter = await this.getTerminalBufferText(paneId);
 
-      // Clean ANSI codes and process output - EXACT tabby-mcp logic
+      // Clean ANSI codes and process output 
       const cleanTextAfter = stripAnsi(textAfter);
       const lines = cleanTextAfter.split('\n');
 
-      // Find start and end markers - EXACT tabby-mcp logic
+      // Find start and end markers 
       let startIndex = -1;
       let endIndex = -1;
 
@@ -139,14 +152,14 @@ ${trimmedCommand}
         }
       }
 
-      // Extract output between markers - EXACT tabby-mcp logic
+      // Extract output between markers 
       if (commandStarted && commandFinished && startIndex !== -1 && endIndex !== -1) {
         const commandOutput = lines.slice(startIndex + 1, endIndex)
           .filter((line: string) => !line.includes(startMarker) && !line.includes(endMarker))
           .join('\n')
           .trim();
 
-        // Extract exit code if available - EXACT tabby-mcp logic
+        // Extract exit code if available 
         for (let i = endIndex; i < Math.min(endIndex + 5, lines.length); i++) {
           if (lines[i].startsWith('exit_code:')) {
             exitCode = parseInt(lines[i].split(':')[1].trim(), 10);
@@ -163,7 +176,7 @@ ${trimmedCommand}
   }
 
   /**
-   * Handle existing running command abortion - adapted from tabby-mcp
+   * Handle existing running command abortion 
    */
   async handleExistingCommand(paneId: string): Promise<void> {
     // For tmux, just send Ctrl+C and wait
@@ -172,7 +185,7 @@ ${trimmedCommand}
   }
 
   /**
-   * Get partial output for aborted commands - EXACT copy from tabby-mcp commandExecutor.ts lines 159-183
+   * Get partial output for aborted command
    */
   getPartialOutput(paneId: string, startMarker: string): string {
     // Note: This would need to be async in tmux context, but keeping interface same as tabby-mcp
