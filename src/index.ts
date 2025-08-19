@@ -402,7 +402,7 @@ server.tool(
   },
   async ({ paneId, command, detectShell, timeout, maxRetries }) => {
     try {
-      const commandId = await enhancedExecutor.executeCommandEnhanced(paneId, command, {
+      const commandId = await enhancedExecutor.executeCommand(paneId, command, {
         detectShell,
         timeout,
         maxRetries

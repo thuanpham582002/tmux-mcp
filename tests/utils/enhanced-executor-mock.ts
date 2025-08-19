@@ -41,7 +41,7 @@ export class EnhancedExecutorMock {
     return {
       // detectShellType removed - shell detection is handled by CommandExecutor
 
-      executeCommandEnhanced: jest.fn().mockImplementation(async (
+      executeCommand: jest.fn().mockImplementation(async (
         paneId: string,
         command: string,
         options: any = {}

@@ -49,9 +49,9 @@ function logEntryToCommand(entry: any): EnhancedCommandExecution {
 // Legacy shell detection code removed - modern implementation in CommandExecutor.executeShellDetection()
 
 /**
- * Enhanced command execution with EXACT tabby-mcp 3-stage trap logic
+ * Command execution with EXACT tabby-mcp 3-stage trap logic
  */
-export async function executeCommandEnhanced(
+export async function executeCommand(
   paneId: string, 
   command: string,
   options: {
@@ -61,7 +61,7 @@ export async function executeCommandEnhanced(
   } = {}
 ): Promise<string> {
   const commandId = uuidv4();
-  const { maxRetries = 3, timeout = 30000, detectShell = true } = options;
+  const { maxRetries = 3, timeout, detectShell = true } = options;
   
   // Initialize enhanced command tracking
   const enhancedCommand: EnhancedCommandExecution = {

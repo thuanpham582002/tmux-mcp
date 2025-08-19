@@ -107,7 +107,7 @@ ${trimmedCommand}
     startMarker: string,
     endMarker: string,
     abortedFn: () => boolean,
-    timeout: number = 300000 // Default 5 minutes, but can be overridden
+    timeout?: number // No default timeout - will run indefinitely if not specified
   ): Promise<{ output: string; exitCode: number | null; commandStarted: boolean; commandFinished: boolean }> {
     let output = '';
     let commandStarted = false;
@@ -118,8 +118,8 @@ ${trimmedCommand}
     const startTime = Date.now();
 
     while (!commandFinished && !abortedFn()) {
-      // Check for timeout
-      if (Date.now() - startTime > timeout) {
+      // Check for timeout only if timeout is specified
+      if (timeout && Date.now() - startTime > timeout) {
         console.warn('Command execution timeout reached');
         break;
       }
