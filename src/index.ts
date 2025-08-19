@@ -402,6 +402,33 @@ server.tool(
   },
   async ({ paneId, command, detectShell, timeout, maxRetries }) => {
     try {
+      // Check for active commands in the same pane only
+      const activeCommands = await enhancedExecutor.listActiveCommands();
+      const activePaneCommands = activeCommands.filter(cmd => cmd.paneId === paneId);
+      
+      if (activePaneCommands.length > 0) {
+        const cmd = activePaneCommands[0];
+        return {
+          content: [{
+            type: "text",
+            text: `Cannot execute new command in pane ${paneId}. There is already an active command:
+
+Command: ${cmd.command}
+Status: ${cmd.status}
+Started: ${cmd.startTime.toISOString()}
+Command ID: ${cmd.id}
+
+Please wait for completion or use:
+• 'cancel-command ${cmd.id}' to stop it
+• 'wait-for-output ${cmd.id}' to check progress  
+• 'get-command-status ${cmd.id}' to monitor
+
+New command not executed: ${command}`
+          }],
+          isError: true
+        };
+      }
+
       const commandId = await enhancedExecutor.executeCommand(paneId, command, {
         detectShell,
         timeout,
