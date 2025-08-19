@@ -125,7 +125,17 @@ export async function executeCommand(
       enhancedCommand.exitCode = result.exitCode ?? undefined;
     } else if (result.commandStarted && !result.commandFinished) {
       enhancedCommand.status = 'timeout';
-      enhancedCommand.result = `[TIMEOUT after ${timeout}ms]\n\n${result.output}`;
+      const statusText = result.commandStarted ? 'RUNNING' : 'NOT_STARTED';
+      enhancedCommand.result = `Command execution timed out after ${timeout}ms
+
+Command: ${command}
+Shell: ${enhancedCommand.shellType || 'unknown'} (${enhancedCommand.currentWorkingDirectory || 'unknown'})
+
+Status: ${statusText}
+Buffer Output:
+${result.output || '(no output captured)'}
+
+Use 'wait-for-output' to continue monitoring or 'cancel-command' to stop`;
       enhancedCommand.exitCode = 124; // Standard timeout exit code
     } else {
       enhancedCommand.status = 'error';
