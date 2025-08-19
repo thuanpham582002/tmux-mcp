@@ -106,7 +106,8 @@ ${trimmedCommand}
     paneId: string,
     startMarker: string,
     endMarker: string,
-    abortedFn: () => boolean
+    abortedFn: () => boolean,
+    timeout: number = 300000 // Default 5 minutes, but can be overridden
   ): Promise<{ output: string; exitCode: number | null; commandStarted: boolean; commandFinished: boolean }> {
     let output = '';
     let commandStarted = false;
@@ -115,7 +116,6 @@ ${trimmedCommand}
     
     // Add timeout protection to prevent infinite waiting 
     const startTime = Date.now();
-    const timeout = 300000; // 5 minutes timeout
 
     while (!commandFinished && !abortedFn()) {
       // Check for timeout
