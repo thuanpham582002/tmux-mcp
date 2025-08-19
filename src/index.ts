@@ -261,38 +261,6 @@ server.tool(
   }
 );
 
-// Execute command in pane - Tool
-server.tool(
-  "execute-command",
-  "Execute a command in a tmux pane and get results. IMPORTANT: Avoid heredoc syntax (cat << EOF) and other multi-line constructs as they conflict with command wrapping. For file writing, prefer: printf 'content\\n' > file, echo statements, or write to temp files instead.",
-  {
-    paneId: z.string().describe("ID of the tmux pane"),
-    command: z.string().describe("Command to execute")
-  },
-  async ({ paneId, command }) => {
-    try {
-      const commandId = await tmux.executeCommand(paneId, command);
-
-      // Create the resource URI for this command's results
-      const resourceUri = `tmux://command/${commandId}/result`;
-
-      return {
-        content: [{
-          type: "text",
-          text: `Command execution started.\n\nTo get results, subscribe to and read resource: ${resourceUri}\n\nStatus will change from 'pending' to 'completed' or 'error' when finished.`
-        }]
-      };
-    } catch (error) {
-      return {
-        content: [{
-          type: "text",
-          text: `Error executing command: ${error}`
-        }],
-        isError: true
-      };
-    }
-  }
-);
 
 // Get command result - Tool
 server.tool(
@@ -421,10 +389,10 @@ server.tool(
   }
 );
 
-// Enhanced execute command with better trap logic - Tool
+// Execute command in pane with enhanced trap logic - Tool
 server.tool(
-  "execute-command-enhanced",
-  "Execute a command with enhanced trap logic, shell detection, and cancellation support. This provides better command completion detection and allows for command cancellation.",
+  "execute-command",
+  "Execute a command in a tmux pane with enhanced trap logic, shell detection, and cancellation support. This provides better command completion detection and allows for command cancellation. IMPORTANT: Avoid heredoc syntax (cat << EOF) and other multi-line constructs as they conflict with command wrapping. For file writing, prefer: printf 'content\\n' > file, echo statements, or write to temp files instead.",
   {
     paneId: z.string().describe("ID of the tmux pane"),
     command: z.string().describe("Command to execute"),
@@ -487,10 +455,96 @@ server.tool(
   }
 );
 
+// Wait for output from a timed-out command - Tool
+server.tool(
+  "wait-for-output",
+  "Wait for specified time and capture output from a command that may still be running after timeout. Can be called multiple times to check progress. Use this after execute-command returns a timeout.",
+  {
+    commandId: z.string().describe("ID of the command to check (from execute-command timeout)"),
+    waitTime: z.number().optional().default(2000).describe("Time to wait in milliseconds before capturing output (default: 2000ms)"),
+    maxChecks: z.number().optional().default(1).describe("Maximum number of polling checks during wait period (default: 1)")
+  },
+  async ({ commandId, waitTime, maxChecks }) => {
+    try {
+      const startTime = Date.now();
+      const checkInterval = Math.max(500, Math.floor(waitTime / Math.max(1, maxChecks)));
+      
+      // Wait and check periodically during the wait period
+      for (let check = 0; check < maxChecks; check++) {
+        await new Promise(resolve => setTimeout(resolve, checkInterval));
+        
+        const status = await enhancedExecutor.getEnhancedCommandStatus(commandId);
+        if (status && status.status !== 'pending') {
+          // Command completed during wait period
+          const resultText = status.status === 'completed' 
+            ? `Command completed after waiting ${Date.now() - startTime}ms!\n\nResult:\n${status.result || '(no output)'}\n\nExit Code: ${status.exitCode || 0}\nStatus: ${status.status}`
+            : `Command failed during wait period after ${Date.now() - startTime}ms.\n\nError Output:\n${status.result || '(no error details)'}\n\nExit Code: ${status.exitCode || 1}\nStatus: ${status.status}`;
+          
+          return {
+            content: [{
+              type: "text",
+              text: resultText
+            }],
+            isError: status.status !== 'completed'
+          };
+        }
+      }
+      
+      // Final check after wait period
+      const finalStatus = await enhancedExecutor.getEnhancedCommandStatus(commandId);
+      
+      if (finalStatus) {
+        if (finalStatus.status === 'completed') {
+          return {
+            content: [{
+              type: "text",
+              text: `Command completed after waiting ${waitTime}ms!\n\nResult:\n${finalStatus.result || '(no output)'}\n\nExit Code: ${finalStatus.exitCode || 0}\nStatus: ${finalStatus.status}`
+            }],
+            isError: false
+          };
+        } else if (finalStatus.status === 'pending') {
+          return {
+            content: [{
+              type: "text",
+              text: `Command still running after ${waitTime}ms wait.\n\nPartial Output:\n${finalStatus.result || '(no output yet)'}\n\nStatus: ${finalStatus.status}\nCommand ID: ${commandId}\n\nCall wait-for-output again to check progress, or use cancel-command to stop execution.`
+            }],
+            isError: false
+          };
+        } else {
+          return {
+            content: [{
+              type: "text",
+              text: `Command finished with status: ${finalStatus.status} after ${waitTime}ms wait.\n\nOutput:\n${finalStatus.result || '(no output)'}\n\nExit Code: ${finalStatus.exitCode || 1}\nStatus: ${finalStatus.status}`
+            }],
+            isError: true
+          };
+        }
+      } else {
+        return {
+          content: [{
+            type: "text",
+            text: `Command not found after ${waitTime}ms wait. Command ID: ${commandId}\n\nThe command may have been cleaned up or never existed.`
+          }],
+          isError: true
+        };
+      }
+      
+    } catch (error) {
+      return {
+        content: [{
+          type: "text",
+          text: `Error waiting for command output: ${error}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
 // Get enhanced command status - Tool
 server.tool(
   "get-command-status",
-  "Get the status of a command executed with execute-command-enhanced, including detailed execution information and ability to see progress",
+  "Get the status of a command executed with execute-command, including detailed execution information and ability to see progress",
   {
     commandId: z.string().describe("ID of the command to check")
   },
@@ -561,7 +615,7 @@ server.tool(
 // Cancel running command - Tool
 server.tool(
   "cancel-command",
-  "Cancel a running command that was started with execute-command-enhanced. This will send Ctrl+C to interrupt the command.",
+  "Cancel a running command that was started with execute-command. This will send Ctrl+C to interrupt the command.",
   {
     commandId: z.string().describe("ID of the command to cancel")
   },
@@ -1223,7 +1277,7 @@ async function handleFzfHistory() {
     const historyCommands = await enhancedExecutor.listAllCommands();
     if (historyCommands.length === 0) {
       console.log('📝 No command history found. Try running some commands first.');
-      console.log('   Use: node build/index.js execute-command-enhanced <pane-id> <command>');
+      console.log('   Use: node build/index.js execute-command <pane-id> <command>');
       return;
     }
     

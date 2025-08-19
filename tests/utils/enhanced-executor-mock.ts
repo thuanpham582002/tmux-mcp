@@ -39,20 +39,7 @@ export class EnhancedExecutorMock {
 
   static getMockEnhancedExecutor() {
     return {
-      detectShellType: jest.fn().mockImplementation(async (paneId: string) => {
-        // Simulate shell detection based on pane ID
-        const shellMap: Record<string, ShellType> = {
-          '%0': 'bash',
-          '%1': 'zsh',
-          '%2': 'fish',
-          '%3': 'sh'
-        };
-        
-        return {
-          shellType: shellMap[paneId] || 'bash',
-          currentWorkingDirectory: '/home/user'
-        };
-      }),
+      // detectShellType removed - shell detection is handled by CommandExecutor
 
       executeCommandEnhanced: jest.fn().mockImplementation(async (
         paneId: string,

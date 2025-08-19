@@ -45,51 +45,8 @@ function logEntryToCommand(entry: any): EnhancedCommandExecution {
   };
 }
 
-// Legacy shell detection - keeping for backward compatibility
-const SHELL_DETECTION_COMMANDS = {
-  bash: 'echo "SHELL_DETECTION:bash:$(pwd):$BASHPID"',
-  zsh: 'echo "SHELL_DETECTION:zsh:$(pwd):$$"',
-  fish: 'echo "SHELL_DETECTION:fish:"(pwd)":"(echo $fish_pid)',
-  sh: 'echo "SHELL_DETECTION:sh:$(pwd):$$"'
-};
-
-/**
- * Detect shell type in the given pane
- */
-export async function detectShellType(paneId: string): Promise<{ shellType: ShellType; currentWorkingDirectory?: string }> {
-  try {
-    // Try different shell detection commands
-    for (const [shell, command] of Object.entries(SHELL_DETECTION_COMMANDS)) {
-      try {
-        await tmux.executeTmux(`send-keys -t '${paneId}' '${command}' Enter`);
-        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for response
-        
-        const content = await tmux.capturePaneContent(paneId, 50);
-        const lines = content.split('\n');
-        
-        // Look for shell detection response
-        for (const line of lines.reverse()) {
-          if (line.includes('SHELL_DETECTION:')) {
-            const parts = line.split(':');
-            if (parts.length >= 3 && parts[1] === shell) {
-              return {
-                shellType: shell as ShellType,
-                currentWorkingDirectory: parts[2]
-              };
-            }
-          }
-        }
-      } catch (error) {
-        // Continue to next shell
-        continue;
-      }
-    }
-    
-    return { shellType: 'unknown' };
-  } catch (error) {
-    return { shellType: 'unknown' };
-  }
-}
+// Shell detection is handled by CommandExecutor using shell-strategies.ts
+// Legacy shell detection code removed - modern implementation in CommandExecutor.executeShellDetection()
 
 /**
  * Enhanced command execution with EXACT tabby-mcp 3-stage trap logic
