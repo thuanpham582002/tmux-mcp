@@ -119,7 +119,8 @@ ${trimmedCommand}
     startMarker: string,
     endMarker: string,
     abortedFn: () => boolean,
-    timeout?: number // No default timeout - will run indefinitely if not specified
+    timeout?: number, // No default timeout - will run indefinitely if not specified
+    commandId?: string // Command ID to check persistent storage for cancellation
   ): Promise<{ output: string; exitCode: number | null; commandStarted: boolean; commandFinished: boolean }> {
     let output = '';
     let commandStarted = false;
@@ -134,6 +135,22 @@ ${trimmedCommand}
       if (timeout && Date.now() - startTime > timeout) {
         console.warn('Command execution timeout reached');
         break;
+      }
+      
+      // Check if command was cancelled in persistent storage by another process
+      if (commandId) {
+        try {
+          const commandLogger = (await import('./command-logger.js')).commandLogger;
+          const persistentCommand = await commandLogger.getCommandById(commandId);
+          if (persistentCommand && persistentCommand.status === 'cancelled') {
+            console.log('Command was cancelled externally, stopping wait');
+            exitCode = -1; // Set exit code to indicate cancellation
+            break;
+          }
+        } catch (error) {
+          // If we can't check persistent storage, continue with normal flow
+          console.warn('Could not check persistent storage for command cancellation:', error);
+        }
       }
       
       await new Promise(resolve => setTimeout(resolve, 100)); // Poll every 100ms

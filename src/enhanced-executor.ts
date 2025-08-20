@@ -115,7 +115,7 @@ export async function executeCommand(
     
     // Step 3: Wait for command completion - EXACT tabby-mcp flow
     const result = await commandExecutor.waitForCommandCompletion(
-      paneId, startMarker, endMarker, () => aborted, timeout
+      paneId, startMarker, endMarker, () => aborted, timeout, commandId
     );
     
     // Process results - EXACT tabby-mcp approach
