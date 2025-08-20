@@ -313,7 +313,7 @@ server.tool(
 // Send raw keys - Tool
 server.tool(
   "send-keys-raw",
-  "Send raw keys to a tmux pane without safety markers. WARNING: This bypasses all safety checks. Use only for sending keystrokes into existing applications or processes (like text editors). For tmux commands or general operations, use the Bash tool instead.",
+  "Send raw keys to a tmux pane without safety markers. WARNING: This bypasses all safety checks. Use ONLY for sending keystrokes into existing running applications or processes (like text editors, vim, nano, interactive shells). DO NOT use for executing commands, running scripts, or general shell operations - use execute-command instead. This is for direct interaction with running programs, not command execution.",
   {
     paneId: z.string().describe("ID of the tmux pane"),
     keys: z.string().describe("Keys to send (e.g., 'Hello' or 'C-x C-s' for Ctrl+X Ctrl+S)")
@@ -392,7 +392,7 @@ server.tool(
 // Execute command in pane with enhanced trap logic - Tool
 server.tool(
   "execute-command",
-  "Execute a command in a tmux pane with enhanced trap logic, shell detection, and cancellation support. This provides better command completion detection and allows for command cancellation. IMPORTANT: Avoid heredoc syntax (cat << EOF) and other multi-line constructs as they conflict with command wrapping. For file writing, prefer: printf 'content\\n' > file, echo statements, or write to temp files instead.",
+  "Execute shell commands, run scripts, or perform system operations in a tmux pane. This is the PRIMARY tool for command execution with enhanced completion detection, error handling, and cancellation support. Use this for: running commands (ls, cd, npm, git), executing scripts, system operations, file operations. IMPORTANT: Avoid heredoc syntax (cat << EOF) and other multi-line constructs as they conflict with command wrapping. For file writing, prefer: printf 'content\\n' > file, echo statements, or write to temp files instead.",
   {
     paneId: z.string().describe("ID of the tmux pane"),
     command: z.string().describe("Command to execute"),
@@ -402,33 +402,6 @@ server.tool(
   },
   async ({ paneId, command, detectShell, timeout, maxRetries }) => {
     try {
-      // Check for active commands in the same pane only
-      const activeCommands = await enhancedExecutor.listActiveCommands();
-      const activePaneCommands = activeCommands.filter(cmd => cmd.paneId === paneId);
-      
-      if (activePaneCommands.length > 0) {
-        const cmd = activePaneCommands[0];
-        return {
-          content: [{
-            type: "text",
-            text: `Cannot execute new command in pane ${paneId}. There is already an active command:
-
-Command: ${cmd.command}
-Status: ${cmd.status}
-Started: ${cmd.startTime.toISOString()}
-Command ID: ${cmd.id}
-
-Please wait for completion or use:
-• 'cancel-command ${cmd.id}' to stop it
-• 'wait-for-output ${cmd.id}' to check progress  
-• 'get-command-status ${cmd.id}' to monitor
-
-New command not executed: ${command}`
-          }],
-          isError: true
-        };
-      }
-
       const commandId = await enhancedExecutor.executeCommand(paneId, command, {
         detectShell,
         timeout,
@@ -482,91 +455,6 @@ New command not executed: ${command}`
   }
 );
 
-// Wait for output from a timed-out command - Tool
-server.tool(
-  "wait-for-output",
-  "Wait for specified time and capture output from a command that may still be running after timeout. Can be called multiple times to check progress. Use this after execute-command returns a timeout.",
-  {
-    commandId: z.string().describe("ID of the command to check (from execute-command timeout)"),
-    waitTime: z.number().optional().default(2000).describe("Time to wait in milliseconds before capturing output (default: 2000ms)"),
-    maxChecks: z.number().optional().default(1).describe("Maximum number of polling checks during wait period (default: 1)")
-  },
-  async ({ commandId, waitTime, maxChecks }) => {
-    try {
-      const startTime = Date.now();
-      const checkInterval = Math.max(500, Math.floor(waitTime / Math.max(1, maxChecks)));
-      
-      // Wait and check periodically during the wait period
-      for (let check = 0; check < maxChecks; check++) {
-        await new Promise(resolve => setTimeout(resolve, checkInterval));
-        
-        const status = await enhancedExecutor.getEnhancedCommandStatus(commandId);
-        if (status && status.status !== 'pending') {
-          // Command completed during wait period
-          const resultText = status.status === 'completed' 
-            ? `Command completed after waiting ${Date.now() - startTime}ms!\n\nResult:\n${status.result || '(no output)'}\n\nExit Code: ${status.exitCode || 0}\nStatus: ${status.status}`
-            : `Command failed during wait period after ${Date.now() - startTime}ms.\n\nError Output:\n${status.result || '(no error details)'}\n\nExit Code: ${status.exitCode || 1}\nStatus: ${status.status}`;
-          
-          return {
-            content: [{
-              type: "text",
-              text: resultText
-            }],
-            isError: status.status !== 'completed'
-          };
-        }
-      }
-      
-      // Final check after wait period
-      const finalStatus = await enhancedExecutor.getEnhancedCommandStatus(commandId);
-      
-      if (finalStatus) {
-        if (finalStatus.status === 'completed') {
-          return {
-            content: [{
-              type: "text",
-              text: `Command completed after waiting ${waitTime}ms!\n\nResult:\n${finalStatus.result || '(no output)'}\n\nExit Code: ${finalStatus.exitCode || 0}\nStatus: ${finalStatus.status}`
-            }],
-            isError: false
-          };
-        } else if (finalStatus.status === 'pending') {
-          return {
-            content: [{
-              type: "text",
-              text: `Command still running after ${waitTime}ms wait.\n\nPartial Output:\n${finalStatus.result || '(no output yet)'}\n\nStatus: ${finalStatus.status}\nCommand ID: ${commandId}\n\nCall wait-for-output again to check progress, or use cancel-command to stop execution.`
-            }],
-            isError: false
-          };
-        } else {
-          return {
-            content: [{
-              type: "text",
-              text: `Command finished with status: ${finalStatus.status} after ${waitTime}ms wait.\n\nOutput:\n${finalStatus.result || '(no output)'}\n\nExit Code: ${finalStatus.exitCode || 1}\nStatus: ${finalStatus.status}`
-            }],
-            isError: true
-          };
-        }
-      } else {
-        return {
-          content: [{
-            type: "text",
-            text: `Command not found after ${waitTime}ms wait. Command ID: ${commandId}\n\nThe command may have been cleaned up or never existed.`
-          }],
-          isError: true
-        };
-      }
-      
-    } catch (error) {
-      return {
-        content: [{
-          type: "text",
-          text: `Error waiting for command output: ${error}`
-        }],
-        isError: true
-      };
-    }
-  }
-);
 
 // Get enhanced command status - Tool
 server.tool(
@@ -632,6 +520,89 @@ server.tool(
         content: [{
           type: "text",
           text: `Error retrieving command status: ${error}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// Wait for command output - Tool
+server.tool(
+  "wait-for-output",
+  "Wait for specified time and capture output from a command that may still be running after timeout. Can be called multiple times to check progress. Use this after execute-command returns a timeout.",
+  {
+    commandId: z.string().describe("ID of the command to check (from execute-command timeout)"),
+    waitTime: z.number().optional().default(2000).describe("Time to wait in milliseconds before capturing output (default: 2000ms)"),
+    maxChecks: z.number().optional().default(1).describe("Maximum number of polling checks during wait period (default: 1)")
+  },
+  async ({ commandId, waitTime, maxChecks }) => {
+    try {
+      // First check if command exists
+      const initialStatus = await enhancedExecutor.getEnhancedCommandStatus(commandId);
+      if (!initialStatus) {
+        return {
+          content: [{
+            type: "text",
+            text: `Command not found: ${commandId}\n\nUse 'list-all-commands' to see available commands.`
+          }],
+          isError: true
+        };
+      }
+
+      // If already completed, return immediately
+      if (initialStatus.status === 'completed' || initialStatus.status === 'error' || initialStatus.status === 'cancelled') {
+        return {
+          content: [{
+            type: "text",
+            text: `Command already finished.\n\nCommand: ${initialStatus.command}\nStatus: ${initialStatus.status.toUpperCase()}\nResult:\n${initialStatus.result || '(no output)'}\nExit Code: ${initialStatus.exitCode || 0}`
+          }]
+        };
+      }
+
+      // Wait and poll for updates
+      const pollInterval = Math.max(100, waitTime / maxChecks);
+      let lastStatus = initialStatus;
+      
+      for (let check = 0; check < maxChecks; check++) {
+        if (check > 0) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+        
+        const currentStatus = await enhancedExecutor.getEnhancedCommandStatus(commandId);
+        if (currentStatus) {
+          lastStatus = currentStatus;
+          
+          // If command completed during wait, return result
+          if (currentStatus.status === 'completed' || currentStatus.status === 'error' || currentStatus.status === 'cancelled') {
+            const duration = currentStatus.endTime 
+              ? currentStatus.endTime.getTime() - currentStatus.startTime.getTime()
+              : Date.now() - currentStatus.startTime.getTime();
+              
+            return {
+              content: [{
+                type: "text",
+                text: `Command completed during wait (${waitTime}ms).\n\nCommand: ${currentStatus.command}\nStatus: ${currentStatus.status.toUpperCase()}\nDuration: ${duration}ms\nResult:\n${currentStatus.result || '(no output)'}\nExit Code: ${currentStatus.exitCode || 0}`
+              }]
+            };
+          }
+        }
+      }
+
+      // Still running after wait
+      const totalDuration = Date.now() - lastStatus.startTime.getTime();
+      return {
+        content: [{
+          type: "text",
+          text: `Command still running after ${waitTime}ms wait.\n\nCommand: ${lastStatus.command}\nStatus: ${lastStatus.status.toUpperCase()}\nTotal Duration: ${totalDuration}ms\nPartial Output:\n${lastStatus.result || '(no output yet)'}\n\nNext Steps:\n• Call 'wait-for-output ${commandId}' again to continue monitoring\n• Use 'cancel-command ${commandId}' to stop the command\n• Use 'get-command-status ${commandId}' for detailed status`
+        }]
+      };
+      
+    } catch (error) {
+      return {
+        content: [{
+          type: "text",
+          text: `Error waiting for command output: ${error}`
         }],
         isError: true
       };

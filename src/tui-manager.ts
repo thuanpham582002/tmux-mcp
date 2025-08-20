@@ -635,7 +635,7 @@ export class TUIManager {
 
   private showHelp(): void {
     // TODO: Implement help modal
-    this.showTemporaryMessage('Help: j/k:nav, c:cancel, r:refresh, v:visual, /:search, q:quit');
+    this.showTemporaryMessage('Help: j/k:nav, c:cancel, r:refresh, v:visual(toggle), /:search, bksp:back');
   }
 
   private showTemporaryMessage(message: string, duration: number = 2000): void {

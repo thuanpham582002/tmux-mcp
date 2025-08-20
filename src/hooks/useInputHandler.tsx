@@ -52,19 +52,17 @@ export const useInputHandler = ({
   useInput((input, key) => {
     // Handle backspace key - mode-specific behavior (avoids tmux Esc key conflict)
     if (key.backspace) {
-      // Only exit these specific modes with backspace
+      // Exit these specific modes with backspace
       if (currentMode === 'copy' || currentMode === 'command' || currentMode === 'search') {
         handlers.exitCurrentMode();
         return;
       }
+      // In normal mode, backspace exits current mode (goes back to previous state)
+      if (currentMode === 'normal') {
+        handlers.exitCurrentMode();
+        return;
+      }
       // In visual mode, backspace becomes a navigation key - handled in handleVisualMode
-      // In normal mode, backspace does nothing (consistent with vim)
-    }
-    
-    // Handle quit commands
-    if (input === 'q' && currentMode === 'normal') {
-      handlers.quit();
-      return;
     }
     
     if (key.ctrl && input === 'c') {
@@ -248,6 +246,12 @@ const handleVisualMode = (input: string, key: any, handlers: InputHandlers) => {
   // Visual mode specific actions
   if (input === ' ' || key.space) {
     handlers.toggleSelection();
+  }
+  
+  // 'v' key to exit visual mode (vim-like toggle behavior)
+  if (input === 'v') {
+    handlers.exitCurrentMode();
+    return;
   }
   
   // Actions on selected items
