@@ -38,6 +38,10 @@ export class CommandExecutor {
     await tmux.executeTmux(`send-keys -t '${paneId}' C-c`);
     await new Promise(resolve => setTimeout(resolve, 100));
     
+    // Send visual separator to distinguish this command execution
+    await tmux.executeTmux(`send-keys -t '${paneId}' -- 'echo "############################"' Enter`);
+    await this.sleep(50);
+    
     const trimmedCommand = command.endsWith('\n') ? command.slice(0, -1) : command;
     
     // Send command with shell detection
