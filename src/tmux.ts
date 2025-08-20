@@ -227,7 +227,8 @@ export async function executeCommand(paneId: string, command: string): Promise<s
   });
 
   // Send the command to the tmux pane
-  await executeTmux(`send-keys -t '${paneId}' '${fullCommand.replace(/'/g, "'\\''")}' Enter`);
+  // Use -- to prevent commands starting with - from being interpreted as flags
+  await executeTmux(`send-keys -t '${paneId}' -- '${fullCommand.replace(/'/g, "'\\''")}' Enter`);
 
   return commandId;
 }
@@ -321,7 +322,8 @@ function getEndMarkerText(): string {
 export async function sendKeysRaw(paneId: string, keys: string): Promise<void> {
   // Escape single quotes in the keys string
   const escapedKeys = keys.replace(/'/g, "'\\''");
-  await executeTmux(`send-keys -t '${paneId}' '${escapedKeys}'`);
+  // Use -- to prevent keys starting with - from being interpreted as flags
+  await executeTmux(`send-keys -t '${paneId}' -- '${escapedKeys}'`);
 }
 
 export interface TmuxPaneDetails extends TmuxPane {
