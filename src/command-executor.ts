@@ -25,6 +25,9 @@ export class CommandExecutor {
 
   constructor() {}
 
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
   /**
    * Execute shell detection only (without running the command yet)
    */
@@ -53,18 +56,23 @@ ${trimmedCommand}
         if (i === 0) {
           // First line - send with continuation
           await tmux.executeTmux(`send-keys -t '${paneId}' '${line}' Enter`);
+          await this.sleep(50); // Wait for the command to be processed
         } else if (i === scriptLines.length - 1) {
           // Last line - send without continuation
           await tmux.executeTmux(`send-keys -t '${paneId}' '${line}' Enter`);
+          await this.sleep(50); // Wait for the command to be processed
         } else {
           // Middle lines - send normally
           await tmux.executeTmux(`send-keys -t '${paneId}' '${line}' Enter`);
+          await this.sleep(50); // Wait for the command to be processed
         }
       }
     } else {
       const singleLineScript = `stty -echo;read ds;eval "$ds";read ss;eval "$ss";stty echo;echo "${startMarker}";\\`;
       await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(singleLineScript)}" Enter`);
+      await this.sleep(100); // Wait for the command to be processed
       await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(trimmedCommand)}" Enter`);
+      await this.sleep(100); // Wait for the command to be processed
     }
 
     // Send shell detection script with proper escaping 
