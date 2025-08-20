@@ -12,6 +12,7 @@ import { useInputHandler } from './hooks/useInputHandler.js';
 import * as enhancedExecutor from './enhanced-executor.js';
 import { copyWithFallback } from './utils/clipboard.js';
 import { formatContent, getNextCopyTarget, getPreviousCopyTarget, getCopyTargetDescription } from './utils/copyFormatter.js';
+import { FzfIntegration } from './fzf-integration.js';
 
 export type ViewMode = 'dashboard' | 'active' | 'history' | 'logs' | 'watch';
 export type InteractionMode = 'normal' | 'visual' | 'command' | 'search' | 'copy';
@@ -176,8 +177,9 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
       setShowCommandInput(true);
     },
     enterSearchMode: () => {
-      setCurrentMode('search');
-      setShowCommandInput(true);
+      // Replaced with fzf integration - use launchFzfSearch instead
+      // setCurrentMode('search');
+      // setShowCommandInput(true);
     },
     exitCurrentMode: () => {
       setCurrentMode('normal');
@@ -290,6 +292,92 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
     quit: () => {
       // Clean exit using Ink's built-in exit function
       exit();
+    },
+    
+    // FZF integration handlers
+    launchFzfActive: async () => {
+      try {
+        const fzf = new FzfIntegration();
+        
+        // Check if fzf is available
+        if (!await fzf.checkFzfAvailable()) {
+          console.error('❌ fzf is not available. Install it with: brew install fzf');
+          return;
+        }
+        
+        // Temporarily exit the TUI to give fzf full terminal control
+        exit();
+        
+        // Run fzf interface
+        const result = await fzf.showActiveCommands();
+        
+        if (!result.cancelled && result.selected.length > 0) {
+          console.log(`\n✅ Selected ${result.selected.length} active command(s):`);
+          for (const selection of result.selected) {
+            const commandId = fzf.parseSelection(selection);
+            console.log(`  • ${selection}`);
+            console.log(`    Command ID: ${commandId}`);
+          }
+        }
+      } catch (error) {
+        console.error('Error in fzf active commands:', error);
+      }
+    },
+    
+    launchFzfHistory: async () => {
+      try {
+        const fzf = new FzfIntegration();
+        
+        // Check if fzf is available
+        if (!await fzf.checkFzfAvailable()) {
+          console.error('❌ fzf is not available. Install it with: brew install fzf');
+          return;
+        }
+        
+        // Temporarily exit the TUI to give fzf full terminal control
+        exit();
+        
+        // Run fzf interface
+        const result = await fzf.showCommandHistory();
+        
+        if (!result.cancelled && result.selected.length > 0) {
+          console.log(`\n✅ Selected command:`);
+          const selection = result.selected[0];
+          const commandId = fzf.parseSelection(selection);
+          console.log(`  • ${selection}`);
+          console.log(`    Command ID: ${commandId}`);
+        }
+      } catch (error) {
+        console.error('Error in fzf history:', error);
+      }
+    },
+    
+    launchFzfSearch: async () => {
+      try {
+        const fzf = new FzfIntegration();
+        
+        // Check if fzf is available
+        if (!await fzf.checkFzfAvailable()) {
+          console.error('❌ fzf is not available. Install it with: brew install fzf');
+          return;
+        }
+        
+        // Temporarily exit the TUI to give fzf full terminal control
+        exit();
+        
+        // Run fzf smart search interface
+        const result = await fzf.smartSearch();
+        
+        if (!result.cancelled && result.selected.length > 0) {
+          console.log(`\n🔍 Search results:`);
+          const selection = result.selected[0];
+          const commandId = fzf.parseSelection(selection);
+          console.log(`  • ${selection}`);
+          console.log(`    Command ID: ${commandId}`);
+        }
+      } catch (error) {
+        console.error('Error in fzf search:', error);
+      }
     }
   };
   

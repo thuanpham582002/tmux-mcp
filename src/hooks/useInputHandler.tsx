@@ -36,6 +36,11 @@ interface InputHandlers {
   cycleCopyTarget: (direction: 'next' | 'previous') => void;
   executeCopy: () => Promise<void>;
   
+  // FZF integration
+  launchFzfActive: () => Promise<void>;
+  launchFzfHistory: () => Promise<void>;
+  launchFzfSearch: () => Promise<void>;
+  
   // System
   quit: () => void;
 }
@@ -162,7 +167,7 @@ const handleNormalMode = (input: string, key: any, handlers: InputHandlers) => {
       handlers.enterCommandMode();
       break;
     case '/':
-      handlers.enterSearchMode();
+      handlers.launchFzfSearch();
       break;
   }
   
@@ -173,6 +178,20 @@ const handleNormalMode = (input: string, key: any, handlers: InputHandlers) => {
       break;
     case 'r':
       handlers.refreshData();
+      break;
+  }
+  
+  // FZF shortcuts
+  switch (input) {
+    case 'a':
+      if (key.ctrl) {
+        handlers.launchFzfActive();
+      }
+      break;
+    case 'h':
+      if (key.ctrl) {
+        handlers.launchFzfHistory();
+      }
       break;
   }
   
