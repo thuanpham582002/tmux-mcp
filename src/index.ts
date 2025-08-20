@@ -397,7 +397,7 @@ server.tool(
     paneId: z.string().describe("ID of the tmux pane"),
     command: z.string().describe("Command to execute"),
     detectShell: z.boolean().optional().default(true).describe("Whether to detect shell type automatically"),
-    timeout: z.number().optional().default(30000).describe("Command timeout in milliseconds"),
+    timeout: z.number().optional().default(99999999).describe("Command timeout in milliseconds"),
     maxRetries: z.number().optional().default(3).describe("Maximum number of retries on failure")
   },
   async ({ paneId, command, detectShell, timeout, maxRetries }) => {
