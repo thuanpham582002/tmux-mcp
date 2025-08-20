@@ -21,7 +21,7 @@ export const CommandInputModal: React.FC<CommandInputModalProps> = ({
       return;
     }
 
-    if (key.escape) {
+    if (key.ctrl && input === 'g') {
       onCancel();
       return;
     }

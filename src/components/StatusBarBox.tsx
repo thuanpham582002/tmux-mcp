@@ -16,11 +16,11 @@ export const StatusBarBox: React.FC<StatusBarBoxProps> = ({
       case 'copy':
         return 'c:Command │ o:Output │ f:Full │ m:Meta │ ←→:Cycle │ Enter:Copy │ Backspace:Exit';
       case 'command':
-        return 'Enter:Execute │ Backspace:Cancel';
+        return 'Enter:Execute │ Ctrl+G:Cancel';
       case 'search':
-        return 'Type to search │ Enter:Apply │ Backspace:Clear';
+        return 'Type to search │ Enter:Apply │ Ctrl+G:Cancel';
       default:
-        return 'j/k:Nav │ Ctrl+U/D:Half │ Ctrl+F/B:Full │ y:Copy │ c:Cancel │ r:Refresh │ /:Search │ v:Visual │ q:Quit';
+        return 'j/k:Nav │ /:Fzf │ Ctrl+A:Active │ Ctrl+H:History │ y:Copy │ c:Cancel │ r:Refresh │ v:Visual │ q:Quit';
     }
   };
 
