@@ -118,15 +118,32 @@ export async function executeCommand(
       paneId, startMarker, endMarker, () => aborted, timeout, commandId
     );
     
-    // Process results - EXACT tabby-mcp approach
-    if (result.commandStarted && result.commandFinished) {
-      enhancedCommand.status = 'completed';
-      enhancedCommand.result = result.output;
-      enhancedCommand.exitCode = result.exitCode ?? undefined;
-    } else if (result.commandStarted && !result.commandFinished) {
-      enhancedCommand.status = 'timeout';
-      const statusText = result.commandStarted ? 'RUNNING' : 'NOT_STARTED';
-      enhancedCommand.result = `Command execution timed out after ${timeout}ms
+    // Process results with clear status priority: cancelled > timeout > running > completed
+    // First check: Was command cancelled externally?
+    try {
+      const persistentCommand = await commandLogger.getCommandById(commandId);
+      if (persistentCommand && persistentCommand.status === 'cancelled') {
+        enhancedCommand.status = 'cancelled';
+        enhancedCommand.result = `Command cancelled by user request\n\nPartial Output:\n${result.output || '(no output captured)'}`;
+        enhancedCommand.exitCode = -1; // Standard cancellation exit code
+        console.log(`[DEBUG] Command ${commandId} was cancelled externally`);
+      } else if (aborted) {
+        // Second check: Was command aborted internally?
+        enhancedCommand.status = 'cancelled';
+        enhancedCommand.result = `Command aborted internally\n\nPartial Output:\n${result.output || '(no output captured)'}`;
+        enhancedCommand.exitCode = -1; // Standard cancellation exit code
+        console.log(`[DEBUG] Command ${commandId} was aborted internally`);
+      } else if (result.commandStarted && result.commandFinished) {
+        // Third check: Command completed successfully
+        enhancedCommand.status = 'completed';
+        enhancedCommand.result = result.output;
+        enhancedCommand.exitCode = result.exitCode ?? 0;
+        console.log(`[DEBUG] Command ${commandId} completed with exit code ${enhancedCommand.exitCode}`);
+      } else if (result.commandStarted && !result.commandFinished) {
+        // Fourth check: Command timed out (started but didn't finish)
+        enhancedCommand.status = 'timeout';
+        const statusText = result.commandStarted ? 'RUNNING' : 'NOT_STARTED';
+        enhancedCommand.result = `Command execution timed out after ${timeout}ms
 
 Command: ${command}
 Shell: ${enhancedCommand.shellType || 'unknown'} (${enhancedCommand.currentWorkingDirectory || 'unknown'})
@@ -136,11 +153,31 @@ Buffer Output:
 ${result.output || '(no output captured)'}
 
 Use 'wait-for-output' to continue monitoring or 'cancel-command' to stop`;
-      enhancedCommand.exitCode = 124; // Standard timeout exit code
-    } else {
-      enhancedCommand.status = 'error';
-      enhancedCommand.result = result.output || 'Failed to start command execution';
-      enhancedCommand.exitCode = result.exitCode ?? 1;
+        enhancedCommand.exitCode = 124; // Standard timeout exit code
+        console.log(`[DEBUG] Command ${commandId} timed out after ${timeout}ms`);
+      } else {
+        // Final check: Command failed to start or other error
+        enhancedCommand.status = 'error';
+        enhancedCommand.result = result.output || 'Failed to start command execution';
+        enhancedCommand.exitCode = result.exitCode ?? 1;
+        console.log(`[DEBUG] Command ${commandId} failed to start or had error`);
+      }
+    } catch (error) {
+      console.warn(`Could not check persistent storage for command ${commandId}, using result-based status:`, error);
+      // Fallback to result-based status if persistent storage unavailable
+      if (result.commandStarted && result.commandFinished) {
+        enhancedCommand.status = 'completed';
+        enhancedCommand.result = result.output;
+        enhancedCommand.exitCode = result.exitCode ?? 0;
+      } else if (result.commandStarted && !result.commandFinished) {
+        enhancedCommand.status = 'timeout';
+        enhancedCommand.result = `Command timed out\n\nOutput:\n${result.output || '(no output captured)'}`;
+        enhancedCommand.exitCode = 124;
+      } else {
+        enhancedCommand.status = 'error';
+        enhancedCommand.result = result.output || 'Failed to execute command';
+        enhancedCommand.exitCode = 1;
+      }
     }
     
     enhancedCommand.endTime = new Date();

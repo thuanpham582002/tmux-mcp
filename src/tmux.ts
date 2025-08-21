@@ -205,33 +205,7 @@ export async function splitPane(
 // Map to track ongoing command executions
 const activeCommands = new Map<string, CommandExecution>();
 
-const startMarkerText = 'S_';
-const endMarkerPrefix = "E_";
-
-// Execute a command in a tmux pane and track its execution
-export async function executeCommand(paneId: string, command: string): Promise<string> {
-  // Generate unique ID for this command execution
-  const commandId = uuidv4();
-
-  const endMarkerText = getEndMarkerText();
-
-  const fullCommand = `echo "${startMarkerText}"; ${command}; echo "${endMarkerText}"`;
-
-  // Store command in tracking map
-  activeCommands.set(commandId, {
-    id: commandId,
-    paneId,
-    command,
-    status: 'pending',
-    startTime: new Date()
-  });
-
-  // Send the command to the tmux pane
-  // Use -- to prevent commands starting with - from being interpreted as flags
-  await executeTmux(`send-keys -t '${paneId}' -- '${fullCommand.replace(/'/g, "'\\''")}' Enter`);
-
-  return commandId;
-}
+// Legacy executeCommand removed - use enhanced-executor.executeCommand instead
 
 export async function checkCommandStatus(commandId: string): Promise<CommandExecution | null> {
   const command = activeCommands.get(commandId);
@@ -308,11 +282,7 @@ export function cleanupOldCommands(maxAgeMinutes: number = 60): void {
   }
 }
 
-function getEndMarkerText(): string {
-  return shellConfig.type === 'fish'
-    ? `${endMarkerPrefix}$status`
-    : `${endMarkerPrefix}$?`;
-}
+// Legacy getEndMarkerText removed - use enhanced-executor markers instead
 
 /**
  * Send raw keys to a tmux pane without any safety markers

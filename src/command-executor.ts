@@ -162,18 +162,26 @@ ${trimmedCommand}
       const cleanTextAfter = stripAnsi(textAfter);
       const lines = cleanTextAfter.split('\n');
 
-      // Find start and end markers 
+      // Find start and end markers - use includes() since markers can appear anywhere in line
       let startIndex = -1;
       let endIndex = -1;
 
+      // Debug: Log buffer content for troubleshooting
+      console.log(`[DEBUG] Looking for markers: start="${startMarker}", end="${endMarker}"`);
+      console.log(`[DEBUG] Buffer lines (last 5): ${lines.slice(-5).map((line, i) => `${lines.length - 5 + i}: ${line}`).join('\n')}`);
+
       for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].startsWith(startMarker)) {
+        if (lines[i].includes(startMarker)) {
           startIndex = i;
           commandStarted = true;
+          console.log(`[DEBUG] Found start marker at line ${i}: "${lines[i]}"`);
+          
+          // Look for end marker from this point forward
           for (let j = startIndex + 1; j < lines.length; j++) {
             if (lines[j].includes(endMarker)) {
               endIndex = j;
               commandFinished = true;
+              console.log(`[DEBUG] Found end marker at line ${j}: "${lines[j]}"`);
               break;
             }
           }
@@ -182,22 +190,37 @@ ${trimmedCommand}
       }
 
       // Extract output between markers 
-      if (commandStarted && commandFinished && startIndex !== -1 && endIndex !== -1) {
-        const commandOutput = lines.slice(startIndex + 1, endIndex)
-          .filter((line: string) => !line.includes(startMarker) && !line.includes(endMarker))
-          .join('\n')
-          .trim();
+      if (commandStarted && startIndex !== -1) {
+        if (commandFinished && endIndex !== -1) {
+          // Complete command - extract between start and end markers
+          const commandOutput = lines.slice(startIndex + 1, endIndex)
+            .filter((line: string) => !line.includes(startMarker) && !line.includes(endMarker))
+            .join('\n')
+            .trim();
 
-        // Extract exit code if available 
-        for (let i = endIndex; i < Math.min(endIndex + 5, lines.length); i++) {
-          if (lines[i].startsWith('exit_code:')) {
-            exitCode = parseInt(lines[i].split(':')[1].trim(), 10);
-            break;
+          // Extract exit code if available 
+          for (let i = endIndex; i < Math.min(endIndex + 5, lines.length); i++) {
+            if (lines[i].startsWith('exit_code:')) {
+              exitCode = parseInt(lines[i].split(':')[1].trim(), 10);
+              console.log(`[DEBUG] Found exit code: ${exitCode}`);
+              break;
+            }
           }
-        }
 
-        output = commandOutput;
-        break;
+          output = commandOutput;
+          console.log(`[DEBUG] Complete command output (${commandOutput.length} chars): ${commandOutput.substring(0, 200)}...`);
+          break;
+        } else {
+          // Partial command (timeout case) - extract from start marker to end of buffer
+          const partialOutput = lines.slice(startIndex + 1)
+            .filter((line: string) => !line.includes(startMarker))
+            .join('\n')
+            .trim();
+          
+          output = partialOutput;
+          console.log(`[DEBUG] Partial command output (${partialOutput.length} chars): ${partialOutput.substring(0, 200)}...`);
+          // Continue polling - don't break yet
+        }
       }
     }
 
