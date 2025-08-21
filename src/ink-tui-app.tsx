@@ -346,6 +346,51 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
           const commandId = fzf.parseSelection(selection);
           console.log(`  • ${selection}`);
           console.log(`    Command ID: ${commandId}`);
+          
+          // Get full command details for copying
+          const allCommands = await enhancedExecutor.listAllCommands();
+          const selectedCommand = allCommands.find(cmd => cmd.id.startsWith(commandId));
+          
+          if (selectedCommand) {
+            // Auto-copy command text to clipboard
+            try {
+              const copyResult = await copyWithFallback(selectedCommand.command, 'command text');
+              console.log(`📋 ${copyResult.message}`);
+              
+              // Show options for additional copying
+              console.log(`\n📋 Copy Options:`);
+              console.log(`  1. Command: ${selectedCommand.command} ✅ (already copied)`);
+              console.log(`  2. Press 'o' to copy full output`);
+              console.log(`  3. Press 'f' to copy command + output`);
+              console.log(`  4. Press any other key to continue...`);
+              
+              // Wait for user input for additional copy options
+              process.stdin.setRawMode(true);
+              process.stdin.resume();
+              process.stdin.once('data', async (key) => {
+                const keyStr = key.toString();
+                
+                try {
+                  if (keyStr === 'o' && selectedCommand.result) {
+                    const outputResult = await copyWithFallback(selectedCommand.result, 'command output');
+                    console.log(`📋 ${outputResult.message}`);
+                  } else if (keyStr === 'f') {
+                    const fullContent = `${selectedCommand.command}\n\n${selectedCommand.result || '(no output)'}`;
+                    const fullResult = await copyWithFallback(fullContent, 'full command + output');
+                    console.log(`📋 ${fullResult.message}`);
+                  }
+                } catch (error) {
+                  console.log(`📋 Copy error: ${error}`);
+                }
+                
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+                console.log(`\nPress any key to exit...`);
+              });
+            } catch (error) {
+              console.log(`📋 Could not copy to clipboard: ${error}`);
+            }
+          }
         }
       } catch (error) {
         console.error('Error in fzf history:', error);
@@ -374,6 +419,51 @@ export const InkTUIApp: React.FC<InkTUIAppProps> = ({
           const commandId = fzf.parseSelection(selection);
           console.log(`  • ${selection}`);
           console.log(`    Command ID: ${commandId}`);
+          
+          // Get full command details for copying
+          const allCommands = await enhancedExecutor.listAllCommands();
+          const selectedCommand = allCommands.find(cmd => cmd.id.startsWith(commandId));
+          
+          if (selectedCommand) {
+            // Auto-copy command text to clipboard
+            try {
+              const copyResult = await copyWithFallback(selectedCommand.command, 'command text');
+              console.log(`📋 ${copyResult.message}`);
+              
+              // Show options for additional copying
+              console.log(`\n📋 Copy Options:`);
+              console.log(`  1. Command: ${selectedCommand.command} ✅ (already copied)`);
+              console.log(`  2. Press 'o' to copy full output`);
+              console.log(`  3. Press 'f' to copy command + output`);
+              console.log(`  4. Press any other key to continue...`);
+              
+              // Wait for user input for additional copy options
+              process.stdin.setRawMode(true);
+              process.stdin.resume();
+              process.stdin.once('data', async (key) => {
+                const keyStr = key.toString();
+                
+                try {
+                  if (keyStr === 'o' && selectedCommand.result) {
+                    const outputResult = await copyWithFallback(selectedCommand.result, 'command output');
+                    console.log(`📋 ${outputResult.message}`);
+                  } else if (keyStr === 'f') {
+                    const fullContent = `${selectedCommand.command}\n\n${selectedCommand.result || '(no output)'}`;
+                    const fullResult = await copyWithFallback(fullContent, 'full command + output');
+                    console.log(`📋 ${fullResult.message}`);
+                  }
+                } catch (error) {
+                  console.log(`📋 Copy error: ${error}`);
+                }
+                
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+                console.log(`\nPress any key to exit...`);
+              });
+            } catch (error) {
+              console.log(`📋 Could not copy to clipboard: ${error}`);
+            }
+          }
         }
       } catch (error) {
         console.error('Error in fzf search:', error);
