@@ -131,13 +131,13 @@ export async function listWindows(sessionId: string): Promise<TmuxWindow[]> {
  * List panes in a window
  */
 export async function listPanes(windowId: string): Promise<TmuxPane[]> {
-  const format = "#{pane_id}:#{pane_title}:#{?pane_active,1,0}";
+  const format = "#{pane_id}|#{pane_title}|#{?pane_active,1,0}";
   const output = await executeTmux(`list-panes -t '${windowId}' -F '${format}'`);
 
   if (!output) return [];
 
   return output.split('\n').map(line => {
-    const [id, title, active] = line.split(':');
+    const [id, title, active] = line.split('|');
     return {
       id,
       windowId,
@@ -330,23 +330,28 @@ export async function getCompleteHierarchy(): Promise<TmuxSessionDetails[]> {
       const panes = await listPanes(window.id);
       const detailedPanes: TmuxPaneDetails[] = [];
 
-      for (const pane of panes) {
-        // Get detailed pane information
-        const format = "#{pane_id}:#{pane_current_command}:#{pane_pid}:#{pane_width}:#{pane_height}:#{pane_current_path}:#{pane_title}:#{?pane_active,1,0}";
-        const paneInfo = await executeTmux(`list-panes -t '${pane.id}' -F '${format}'`);
-        const [id, command, pid, width, height, currentPath, title, active] = paneInfo.split(':');
+      // Get detailed pane information for all panes in window at once
+      const format = "#{pane_id}|#{pane_current_command}|#{pane_pid}|#{pane_width}|#{pane_height}|#{pane_current_path}|#{pane_title}|#{?pane_active,1,0}";
+      const allPanesInfo = await executeTmux(`list-panes -t '${window.id}' -F '${format}'`);
+      
+      if (allPanesInfo) {
+        for (const paneInfo of allPanesInfo.split('\n')) {
+          if (paneInfo.trim()) {
+            const [id, command, pid, width, height, currentPath, title, active] = paneInfo.split('|');
 
-        detailedPanes.push({
-          id,
-          windowId: window.id,
-          title,
-          active: active === '1',
-          command,
-          pid: parseInt(pid, 10),
-          width: parseInt(width, 10),
-          height: parseInt(height, 10),
-          currentPath
-        });
+            detailedPanes.push({
+              id,
+              windowId: window.id,
+              title,
+              active: active === '1',
+              command,
+              pid: parseInt(pid, 10),
+              width: parseInt(width, 10),
+              height: parseInt(height, 10),
+              currentPath
+            });
+          }
+        }
       }
 
       // Get window layout
