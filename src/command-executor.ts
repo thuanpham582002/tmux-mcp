@@ -138,7 +138,7 @@ ${trimmedCommand}
       }
 
       // Add 100ms delay to prevent high CPU usage in tight loop
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       // Check if command was cancelled in persistent storage by another process
       if (commandId) {
