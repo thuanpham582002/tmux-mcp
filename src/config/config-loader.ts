@@ -7,6 +7,7 @@ import { readFileSync, existsSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { Config, ConfigSchema, ConfigLoadOptions, ConfigValidationResult } from './config-types.js';
+import { expandPatterns, getMatchingTools, analyzePatterns, PatternMatch } from './wildcard-matcher.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,7 +47,7 @@ const CONFIG_PATHS = [
 /**
  * Load configuration from file or create default
  */
-export function loadConfig(options: ConfigLoadOptions = {}): Config {
+export function loadConfig(options: ConfigLoadOptions = {}, availableTools: any[] = []): Config {
   const configPath = options.configPath || findConfigFile();
   let config = DEFAULT_CONFIG;
 
@@ -69,7 +70,14 @@ export function loadConfig(options: ConfigLoadOptions = {}): Config {
   }
 
   // Apply command line overrides
-  return applyCliOverrides(config, options);
+  config = applyCliOverrides(config, options);
+
+  // Expand wildcard patterns (requires available tools)
+  if (availableTools.length > 0) {
+    config = expandWildcardPatterns(config, availableTools);
+  }
+
+  return config;
 }
 
 /**
@@ -111,6 +119,29 @@ function mergeConfig(defaultConfig: Config, userConfig: any): Config {
 }
 
 /**
+ * Expand wildcard patterns to exact tool names
+ */
+function expandWildcardPatterns(config: Config, availableTools: any[] = []): Config {
+  const result = { ...config };
+  const mcp = { ...result.mcp };
+
+  // Process disabled patterns
+  if (mcp.disabledPatterns && mcp.disabledPatterns.length > 0) {
+    const disabledFromPatterns = getMatchingTools(mcp.disabledPatterns, availableTools);
+    mcp.disabledTools = [...(mcp.disabledTools || []), ...disabledFromPatterns];
+  }
+
+  // Process enabled patterns
+  if (mcp.enabledPatterns && mcp.enabledPatterns.length > 0) {
+    const enabledFromPatterns = getMatchingTools(mcp.enabledPatterns, availableTools);
+    mcp.enabledTools = [...(mcp.enabledTools || []), ...enabledFromPatterns];
+  }
+
+  result.mcp = mcp;
+  return result;
+}
+
+/**
  * Apply command line overrides
  */
 function applyCliOverrides(config: Config, options: ConfigLoadOptions): Config {
@@ -124,13 +155,21 @@ function applyCliOverrides(config: Config, options: ConfigLoadOptions): Config {
     result.mcp.enabledTools = [...(result.mcp.enabledTools || []), ...options.enabledTools];
   }
 
+  if (options.disabledPatterns) {
+    result.mcp.disabledPatterns = [...(result.mcp.disabledPatterns || []), ...options.disabledPatterns];
+  }
+
+  if (options.enabledPatterns) {
+    result.mcp.enabledPatterns = [...(result.mcp.enabledPatterns || []), ...options.enabledPatterns];
+  }
+
   return result;
 }
 
 /**
  * Validate configuration file
  */
-export function validateConfig(configPath: string): ConfigValidationResult {
+export function validateConfig(configPath: string, availableTools: any[] = []): ConfigValidationResult {
   try {
     if (!existsSync(configPath)) {
       return {
@@ -165,6 +204,26 @@ export function validateConfig(configPath: string): ConfigValidationResult {
 
       if (conflicts.length > 0) {
         warnings.push(`Tools specified in both enabled and disabled lists: ${conflicts.join(', ')}`);
+      }
+    }
+
+    // Validate wildcard patterns
+    if (config.mcp.disabledPatterns || config.mcp.enabledPatterns) {
+      const allPatterns = [
+        ...(config.mcp.disabledPatterns || []),
+        ...(config.mcp.enabledPatterns || [])
+      ];
+
+      const patternAnalysis = analyzePatterns(allPatterns, availableTools);
+
+      // Add warnings for invalid patterns
+      patternAnalysis.invalid.forEach(invalid => {
+        warnings.push(`Invalid pattern "${invalid.pattern}": ${invalid.error}`);
+      });
+
+      // Add info about pattern matches
+      if (patternAnalysis.totalMatches > 0) {
+        console.log(`🔍 Pattern analysis: ${patternAnalysis.totalMatches} tools matched by ${patternAnalysis.valid.length} patterns`);
       }
     }
 

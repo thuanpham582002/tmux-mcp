@@ -10,6 +10,7 @@ import { commandLogger } from "./command-logger.js";
 import { InkTUIManager as TUIManager } from "./ink-tui-manager.js";
 import { FzfIntegration } from "./fzf-integration.js";
 import { getConfigManager, setupToolRegistry } from "./config/config-manager.js";
+import { loadConfig } from "./config/config-loader.js";
 
 // Create MCP server
 const server = new McpServer({
@@ -1329,6 +1330,8 @@ CONFIGURATION OPTIONS:
   --config PATH        Configuration file path
   --disable-tools LIST Comma-separated list of tools to disable
   --enable-tools LIST  Comma-separated list of tools to enable (whitelist mode)
+  --disable-patterns LIST Comma-separated wildcard patterns to disable
+  --enable-patterns LIST Comma-separated wildcard patterns to enable
   --validate-config    Validate configuration file
   --show-config        Show current configuration
   --init-config PATH   Create default configuration file
@@ -1341,6 +1344,9 @@ EXAMPLES:
   tmux-mcp                           # Start MCP server with default config
   tmux-mcp --disable-tools send-keys-raw  # Disable dangerous tools
   tmux-mcp --enable-tools list-sessions,list-windows  # Whitelist mode
+  tmux-mcp --disable-patterns "*-raw,session-*"  # Disable raw and session tools
+  tmux-mcp --enable-patterns "list-*,get-*"  # Enable read-only tools
+  tmux-mcp --disable-patterns "?plit-*,[sc]*-*"  # Complex pattern disable
   tmux-mcp --config custom.json       # Use specific config file
   tmux-mcp --validate-config          # Validate configuration
   tmux-mcp --show-config              # Show current configuration
@@ -1360,6 +1366,8 @@ CONFIGURATION:
     "version": "1.0.0",
     "mcp": {
       "disabledTools": ["send-keys-raw"],
+      "disabledPatterns": ["*-raw", "session-*"],
+      "enabledPatterns": ["list-*", "get-*"],
       "settings": {}
     },
     "cli": {
@@ -1369,7 +1377,17 @@ CONFIGURATION:
     }
   }
 
+WILDCARD PATTERNS:
+  *       - Match any characters
+  ?       - Match single character
+  [abc]   - Match character set
+  [a-z]   - Match character range
+  session-* - Match all session management tools
+  *-raw   - Match all tools ending with "-raw"
+  list-*  - Match all listing tools
+
 NOTE: Configuration only affects MCP server mode. CLI commands remain fully functional.
+Wildcards are expanded to exact tool names during configuration loading.
 `);
 }
 
@@ -1847,7 +1865,32 @@ async function handleInitConfig(targetPath?: string) {
  * List available tools
  */
 async function handleListTools() {
-  const configManager = getConfigManager();
+  // Get command line arguments for pattern support
+  const { values } = parseArgs({
+    options: {
+      'config': { type: 'string' },
+      'disable-tools': { type: 'string' },
+      'enable-tools': { type: 'string' },
+      'disable-patterns': { type: 'string' },
+      'enable-patterns': { type: 'string' },
+      'list-tools': { type: 'boolean' }
+    },
+    allowPositionals: false
+  });
+
+  // Create config options with CLI arguments
+  const configOptions = {
+    configPath: values['config'],
+    disabledTools: values['disable-tools'] ? values['disable-tools'].split(',') : undefined,
+    enabledTools: values['enable-tools'] ? values['enable-tools'].split(',') : undefined,
+    disabledPatterns: values['disable-patterns'] ? values['disable-patterns'].split(',') : undefined,
+    enabledPatterns: values['enable-patterns'] ? values['enable-patterns'].split(',') : undefined
+  };
+
+  // Load configuration with pattern expansion
+  const configWithPatterns = loadConfig(configOptions, toolDefinitions);
+  const configManager = getConfigManager(configOptions);
+  configManager.updateConfig(configWithPatterns);
 
   // Create a temporary server instance for tool listing
   const tempServer = new McpServer({
@@ -1900,6 +1943,8 @@ async function main() {
         'config': { type: 'string' },
         'disable-tools': { type: 'string' },
         'enable-tools': { type: 'string' },
+        'disable-patterns': { type: 'string' },
+        'enable-patterns': { type: 'string' },
         'validate-config': { type: 'boolean' },
         'show-config': { type: 'boolean' },
         'init-config': { type: 'string' },
@@ -1946,11 +1991,16 @@ async function main() {
     const configOptions = {
       configPath: values['config'],
       disabledTools: values['disable-tools'] ? values['disable-tools'].split(',') : undefined,
-      enabledTools: values['enable-tools'] ? values['enable-tools'].split(',') : undefined
+      enabledTools: values['enable-tools'] ? values['enable-tools'].split(',') : undefined,
+      disabledPatterns: values['disable-patterns'] ? values['disable-patterns'].split(',') : undefined,
+      enabledPatterns: values['enable-patterns'] ? values['enable-patterns'].split(',') : undefined
     };
 
-    const configManager = getConfigManager(configOptions);
-    const config = configManager.getConfig();
+    // Load configuration with available tools for pattern expansion
+    const configManagerWithTools = getConfigManager(configOptions);
+    const configWithExpandedPatterns = loadConfig(configOptions, toolDefinitions);
+    configManagerWithTools.updateConfig(configWithExpandedPatterns);
+    const config = configManagerWithTools.getConfig();
 
     // Set shell configuration
     tmux.setShellConfig({

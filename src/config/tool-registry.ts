@@ -7,6 +7,7 @@ import { ToolDefinition, ToolRegistry, Config } from './config-types.js';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { toolMatchesPatterns } from './wildcard-matcher.js';
 
 /**
  * Tool registry implementation
@@ -63,11 +64,25 @@ export class TmuxToolRegistry {
    * Check if a tool should be enabled
    */
   private isToolEnabled(tool: ToolDefinition): boolean {
-    const { disabledTools, enabledTools } = this.config.mcp;
+    const { disabledTools, enabledTools, disabledPatterns, enabledPatterns } = this.config.mcp;
 
     // If whitelist mode (enabledTools specified), only enable whitelisted tools
     if (enabledTools && enabledTools.length > 0) {
       return enabledTools.includes(tool.name);
+    }
+
+    // Check if tool matches any disabled patterns
+    if (disabledPatterns && disabledPatterns.length > 0) {
+      if (toolMatchesPatterns(tool.name, disabledPatterns)) {
+        return false;
+      }
+    }
+
+    // Check if tool matches any enabled patterns (only if no enabledTools)
+    if (enabledPatterns && enabledPatterns.length > 0 && !enabledTools) {
+      if (toolMatchesPatterns(tool.name, enabledPatterns)) {
+        return true;
+      }
     }
 
     // Otherwise, use blacklist mode (default)
@@ -184,6 +199,81 @@ export class TmuxToolRegistry {
     this.config = config;
     this.disabledToolsSet = new Set(config.mcp.disabledTools || []);
     this.registerEnabledTools();
+  }
+
+  /**
+   * Get pattern-based statistics
+   */
+  getPatternStats() {
+    const { disabledPatterns, enabledPatterns } = this.config.mcp;
+    const tools = Array.from(this.registry.tools.values());
+
+    const disabledByPatterns = new Set<string>();
+    const enabledByPatterns = new Set<string>();
+
+    if (disabledPatterns) {
+      for (const tool of tools) {
+        if (toolMatchesPatterns(tool.name, disabledPatterns)) {
+          disabledByPatterns.add(tool.name);
+        }
+      }
+    }
+
+    if (enabledPatterns) {
+      for (const tool of tools) {
+        if (toolMatchesPatterns(tool.name, enabledPatterns)) {
+          enabledByPatterns.add(tool.name);
+        }
+      }
+    }
+
+    return {
+      disabledPatterns: disabledPatterns || [],
+      enabledPatterns: enabledPatterns || [],
+      disabledByPatterns: Array.from(disabledByPatterns),
+      enabledByPatterns: Array.from(enabledByPatterns),
+      toolsAffected: disabledByPatterns.size + enabledByPatterns.size
+    };
+  }
+
+  /**
+   * Get detailed pattern analysis
+   */
+  analyzePatterns() {
+    const stats = this.getPatternStats();
+    const tools = Array.from(this.registry.tools.values());
+
+    const categorizedTools = {
+      disabledByExact: this.disabledToolsSet,
+      disabledByPatterns: new Set(stats.disabledByPatterns),
+      enabled: new Set<string>()
+    };
+
+    // Calculate enabled tools
+    for (const tool of tools) {
+      if (!categorizedTools.disabledByExact.has(tool.name) &&
+          !categorizedTools.disabledByPatterns.has(tool.name) &&
+          this.isToolEnabled(tool)) {
+        categorizedTools.enabled.add(tool.name);
+      }
+    }
+
+    return {
+      ...stats,
+      categorizedTools: {
+        disabledByExact: Array.from(categorizedTools.disabledByExact),
+        disabledByPatterns: Array.from(categorizedTools.disabledByPatterns),
+        enabled: Array.from(categorizedTools.enabled)
+      },
+      totalTools: tools.length,
+      summary: {
+        totalDisabled: categorizedTools.disabledByExact.size + categorizedTools.disabledByPatterns.size,
+        totalEnabled: categorizedTools.enabled.size,
+        disabledByExactPercent: Math.round((categorizedTools.disabledByExact.size / tools.length) * 100),
+        disabledByPatternsPercent: Math.round((categorizedTools.disabledByPatterns.size / tools.length) * 100),
+        enabledPercent: Math.round((categorizedTools.enabled.size / tools.length) * 100)
+      }
+    };
   }
 }
 

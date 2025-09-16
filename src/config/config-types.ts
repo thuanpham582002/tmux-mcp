@@ -22,6 +22,9 @@ export interface McpConfig {
   disabledTools?: string[];
   enabledTools?: string[];
   settings?: Record<string, ToolSettings>;
+  // Wildcard pattern support (for future expansion)
+  disabledPatterns?: string[];
+  enabledPatterns?: string[];
 }
 
 /**
@@ -63,6 +66,8 @@ export const ConfigSchema = z.object({
   mcp: z.object({
     disabledTools: z.array(z.string()).optional().default([]),
     enabledTools: z.array(z.string()).optional(),
+    disabledPatterns: z.array(z.string()).optional().default([]),
+    enabledPatterns: z.array(z.string()).optional().default([]),
     settings: z.record(z.record(z.any())).optional().default({}),
   }).default({}),
   cli: z.object({
@@ -89,6 +94,8 @@ export interface ConfigLoadOptions {
   configPath?: string;
   disabledTools?: string[];
   enabledTools?: string[];
+  disabledPatterns?: string[];
+  enabledPatterns?: string[];
 }
 
 /**
