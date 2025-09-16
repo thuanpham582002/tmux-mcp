@@ -9,6 +9,7 @@ import * as enhancedExecutor from "./enhanced-executor.js";
 import { commandLogger } from "./command-logger.js";
 import { InkTUIManager as TUIManager } from "./ink-tui-manager.js";
 import { FzfIntegration } from "./fzf-integration.js";
+import { getConfigManager, setupToolRegistry } from "./config/config-manager.js";
 
 // Create MCP server
 const server = new McpServer({
@@ -27,7 +28,367 @@ const server = new McpServer({
   }
 });
 
-// List all tmux sessions - Tool
+// Tool helpers for creating tool definitions
+const ToolHelpers = {
+  createTool: (
+    name: string,
+    description: string,
+    schema: z.ZodObject<any, any, any>,
+    handler: (args: any) => Promise<any>,
+    category: string = "general",
+    defaultEnabled: boolean = true
+  ) => ({
+    name,
+    description,
+    schema,
+    handler,
+    category,
+    defaultEnabled
+  })
+};
+
+// Tool definitions for configuration-based registration
+const toolDefinitions = [
+  // Session Management Tools
+  ToolHelpers.createTool(
+    "list-sessions",
+    "List all active tmux sessions",
+    z.object({}),
+    async () => {
+      try {
+        const sessions = await tmux.listSessions();
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(sessions, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error listing tmux sessions: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "session-management",
+    true
+  ),
+
+  ToolHelpers.createTool(
+    "find-session",
+    "Find a tmux session by name",
+    z.object({
+      name: z.string().describe("Name of the tmux session to find")
+    }),
+    async ({ name }: { name: string }) => {
+      try {
+        const session = await tmux.findSessionByName(name);
+        return {
+          content: [{
+            type: "text",
+            text: session ? JSON.stringify(session, null, 2) : `Session not found: ${name}`
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error finding tmux session: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "session-management",
+    true
+  ),
+
+  ToolHelpers.createTool(
+    "create-session",
+    "Create a new tmux session",
+    z.object({
+      name: z.string().describe("Name for the new tmux session")
+    }),
+    async ({ name }) => {
+      try {
+        const session = await tmux.createSession(name);
+        return {
+          content: [{
+            type: "text",
+            text: session
+              ? `Session created: ${JSON.stringify(session, null, 2)}`
+              : `Failed to create session: ${name}`
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error creating session: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "session-management",
+    true
+  ),
+
+  // Window Management Tools
+  ToolHelpers.createTool(
+    "list-windows",
+    "List windows in a tmux session",
+    z.object({
+      sessionId: z.string().describe("ID of the tmux session")
+    }),
+    async ({ sessionId }) => {
+      try {
+        const windows = await tmux.listWindows(sessionId);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(windows, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error listing windows: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "window-management",
+    true
+  ),
+
+  ToolHelpers.createTool(
+    "create-window",
+    "Create a new window in a tmux session",
+    z.object({
+      sessionId: z.string().describe("ID of the tmux session"),
+      name: z.string().describe("Name for the new window")
+    }),
+    async ({ sessionId, name }) => {
+      try {
+        const window = await tmux.createWindow(sessionId, name);
+        return {
+          content: [{
+            type: "text",
+            text: window
+              ? `Window created: ${JSON.stringify(window, null, 2)}`
+              : `Failed to create window: ${name}`
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error creating window: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "window-management",
+    true
+  ),
+
+  // Pane Management Tools
+  ToolHelpers.createTool(
+    "list-panes",
+    "List panes in a tmux window",
+    z.object({
+      windowId: z.string().describe("ID of the tmux window")
+    }),
+    async ({ windowId }) => {
+      try {
+        const panes = await tmux.listPanes(windowId);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(panes, null, 2)
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error listing panes: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "pane-management",
+    true
+  ),
+
+  ToolHelpers.createTool(
+    "capture-pane",
+    "Capture content from a tmux pane",
+    z.object({
+      paneId: z.string().describe("ID of the tmux pane"),
+      lines: z.string().optional().describe("Number of lines to capture")
+    }),
+    async ({ paneId, lines }) => {
+      try {
+        const linesCount = lines ? parseInt(lines, 10) : undefined;
+        const content = await tmux.capturePaneContent(paneId, linesCount);
+        return {
+          content: [{
+            type: "text",
+            text: content || "No content captured"
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error capturing pane content: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "pane-management",
+    true
+  ),
+
+  ToolHelpers.createTool(
+    "split-pane",
+    "Split a tmux pane horizontally or vertically",
+    z.object({
+      paneId: z.string().describe("ID of the tmux pane to split"),
+      direction: z.enum(["horizontal", "vertical"]).describe("Split direction"),
+      percentage: z.number().optional().describe("Percentage of space for new pane (1-99)")
+    }),
+    async ({ paneId, direction, percentage }) => {
+      try {
+        const newPane = await tmux.splitPane(paneId, direction, percentage);
+        return {
+          content: [{
+            type: "text",
+            text: newPane
+              ? `Pane split successfully: ${JSON.stringify(newPane, null, 2)}`
+              : `Failed to split pane`
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error splitting pane: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "pane-management",
+    true
+  ),
+
+  // Command Execution Tools
+  ToolHelpers.createTool(
+    "execute-command",
+    "Execute shell commands, run scripts, or perform system operations in a tmux pane. This is the PRIMARY tool for command execution with enhanced completion detection, error handling, and cancellation support. Use this for: running commands (ls, cd, npm, git), executing scripts, system operations, file operations. IMPORTANT: Avoid heredoc syntax (cat << EOF) and other multi-line constructs as they conflict with command wrapping. For file writing, prefer: printf 'content\\n' > file, echo statements, or write to temp files instead.",
+    z.object({
+      paneId: z.string().describe("ID of the tmux pane"),
+      command: z.string().describe("Command to execute"),
+      detectShell: z.boolean().optional().default(true).describe("Whether to detect shell type automatically"),
+      timeout: z.number().optional().default(99999999).describe("Command timeout in milliseconds"),
+      maxRetries: z.number().optional().default(3).describe("Maximum number of retries on failure")
+    }),
+    async ({ paneId, command, detectShell, timeout, maxRetries }) => {
+      try {
+        const commandId = await enhancedExecutor.executeCommand(paneId, command, {
+          detectShell,
+          timeout,
+          maxRetries
+        });
+
+        const startTime = Date.now();
+        const pollInterval = 100;
+
+        while (Date.now() - startTime < timeout) {
+          const status = await enhancedExecutor.getEnhancedCommandStatus(commandId);
+
+          if (status && status.status !== 'pending') {
+            const resultText = status.status === 'completed'
+              ? `Command completed successfully.\n\nResult:\n${status.result || '(no output)'}\n\nExit Code: ${status.exitCode || 0}\nStatus: ${status.status}`
+              : `Command failed.\n\nError:\n${status.result || '(no error details)'}\n\nExit Code: ${status.exitCode || 1}\nStatus: ${status.status}`;
+
+            return {
+              content: [{
+                type: "text",
+                text: resultText
+              }],
+              isError: status.status !== 'completed'
+            };
+          }
+
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: `Command timed out after ${timeout}ms.\n\nCommand ID: ${commandId}\n\nUse 'get-command-status' to check current status or 'cancel-command' to stop execution.`
+          }],
+          isError: true
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error executing enhanced command: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "command-execution",
+    true
+  ),
+
+  // Raw Input Tools (potentially dangerous - disabled by default in some configs)
+  ToolHelpers.createTool(
+    "send-keys-raw",
+    "Send raw keys to a tmux pane without safety markers. WARNING: This bypasses all safety checks. Use ONLY for sending keystrokes into existing running applications or processes (like text editors, vim, nano, interactive shells). DO NOT use for executing commands, running scripts, or general shell operations - use execute-command instead. This is for direct interaction with running programs, not command execution.",
+    z.object({
+      paneId: z.string().describe("ID of the tmux pane"),
+      keys: z.string().describe("Keys to send (e.g., 'Hello' or 'C-x C-s' for Ctrl+X Ctrl+S)")
+    }),
+    async ({ paneId, keys }) => {
+      try {
+        await tmux.sendKeysRaw(paneId, keys);
+        return {
+          content: [{
+            type: "text",
+            text: `Raw keys sent to pane ${paneId}: ${keys}`
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error sending raw keys: ${error}`
+          }],
+          isError: true
+        };
+      }
+    },
+    "raw-input",
+    true // Can be disabled via config for security
+  )
+];
+
+// Legacy tool registrations - these will be migrated gradually
 server.tool(
   "list-sessions",
   "List all active tmux sessions",
@@ -964,21 +1325,51 @@ COMMANDS:
   interactive, i      Interactive command management mode
   help, -h, --help    Show this help message
 
+CONFIGURATION OPTIONS:
+  --config PATH        Configuration file path
+  --disable-tools LIST Comma-separated list of tools to disable
+  --enable-tools LIST  Comma-separated list of tools to enable (whitelist mode)
+  --validate-config    Validate configuration file
+  --show-config        Show current configuration
+  --init-config PATH   Create default configuration file
+  --list-tools         List all available tools and their status
+
 OPTIONS:
   --shell-type, -s    Shell type (bash, zsh, fish, sh) [default: bash]
 
 EXAMPLES:
-  tmux-mcp                           # Start MCP server
-  tmux-mcp command-running           # Show active commands  
-  tmux-mcp command-history           # Show all commands
-  tmux-mcp command-cancel abc123     # Cancel command by ID
-  tmux-mcp command-cleanup           # Clean old history
+  tmux-mcp                           # Start MCP server with default config
+  tmux-mcp --disable-tools send-keys-raw  # Disable dangerous tools
+  tmux-mcp --enable-tools list-sessions,list-windows  # Whitelist mode
+  tmux-mcp --config custom.json       # Use specific config file
+  tmux-mcp --validate-config          # Validate configuration
+  tmux-mcp --show-config              # Show current configuration
+  tmux-mcp --init-config              # Create default config file
+  tmux-mcp --list-tools               # List available tools
+  tmux-mcp command-running           # CLI commands always available
   tmux-mcp interactive               # Interactive mode
 
 TMUX INTEGRATION:
   Add to your .tmux.conf:
     bind-key C-m run-shell "tmux split-window -p 30 'tmux-mcp command-running; read'"
     bind-key C-h run-shell "tmux split-window -p 40 'tmux-mcp command-history; read'"
+
+CONFIGURATION:
+  Create .tmux-mcp.json to customize MCP tool availability:
+  {
+    "version": "1.0.0",
+    "mcp": {
+      "disabledTools": ["send-keys-raw"],
+      "settings": {}
+    },
+    "cli": {
+      "defaults": {
+        "shellType": "bash"
+      }
+    }
+  }
+
+NOTE: Configuration only affects MCP server mode. CLI commands remain fully functional.
 `);
 }
 
@@ -1371,15 +1762,172 @@ async function handleFzfSearch() {
   }
 }
 
+/**
+ * Validate configuration file
+ */
+async function handleValidateConfig(configPath?: string) {
+  const configManager = getConfigManager();
+
+  if (!configPath) {
+    const paths = configManager.getAvailableConfigPaths();
+    if (paths.length === 0) {
+      console.log('No configuration file found.');
+      console.log('Use --init-config to create a default configuration file.');
+      return;
+    }
+    configPath = paths[0];
+  }
+
+  console.log(`Validating configuration: ${configPath}`);
+
+  const result = configManager.validateConfigFile(configPath);
+
+  if (result.valid) {
+    console.log('✅ Configuration is valid!');
+    if (result.warnings) {
+      console.log('\n⚠️  Warnings:');
+      result.warnings.forEach(warning => console.log(`  ${warning}`));
+    }
+  } else {
+    console.log('❌ Configuration validation failed:');
+    result.errors?.forEach(error => console.log(`  ${error}`));
+    process.exit(1);
+  }
+}
+
+/**
+ * Show current configuration
+ */
+async function handleShowConfig() {
+  const configManager = getConfigManager();
+  const summary = configManager.getConfigSummary();
+
+  console.log('📋 Current Configuration');
+  console.log('========================');
+  console.log(`Version: ${summary.version}`);
+  console.log(`Config File: ${summary.configFile || 'None'}`);
+  console.log('\nMCP Settings:');
+  console.log(`  Disabled Tools: ${summary.mcp.disabledCount}`);
+  console.log(`  Enabled Tools: ${summary.mcp.enabledCount}`);
+  console.log(`  Whitelist Mode: ${summary.mcp.whitelistMode}`);
+
+  if (summary.cli.defaults) {
+    console.log('\nCLI Defaults:');
+    if (summary.cli.defaults.shellType) {
+      console.log(`  Shell Type: ${summary.cli.defaults.shellType}`);
+    }
+    if (summary.cli.defaults.timeout) {
+      console.log(`  Timeout: ${summary.cli.defaults.timeout}`);
+    }
+  }
+}
+
+/**
+ * Initialize configuration file
+ */
+async function handleInitConfig(targetPath?: string) {
+  const configManager = getConfigManager();
+
+  try {
+    const content = configManager.createDefaultConfigContent(targetPath);
+    const path = targetPath || './.tmux-mcp.json';
+
+    console.log(`Creating default configuration file: ${path}`);
+    console.log('\nConfiguration content:');
+    console.log(content);
+
+    console.log('\n💡 Save this content to your configuration file to get started.');
+  } catch (error) {
+    console.error(`❌ Failed to create configuration: ${error}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * List available tools
+ */
+async function handleListTools() {
+  const configManager = getConfigManager();
+
+  // Create a temporary server instance for tool listing
+  const tempServer = new McpServer({
+    name: "tmux-context-temp",
+    version: "0.1.0"
+  }, {
+    capabilities: {
+      resources: { subscribe: false },
+      tools: { listChanged: false },
+      logging: {}
+    }
+  });
+
+  const toolRegistry = setupToolRegistry(tempServer, configManager.getConfig());
+
+  // Register all tool definitions temporarily for listing
+  for (const toolDefinition of toolDefinitions) {
+    toolRegistry.registerTool(toolDefinition);
+  }
+
+  const stats = toolRegistry.getStats();
+
+  console.log('🔧 Available Tools');
+  console.log('==================');
+  console.log(`Total Tools: ${stats.total}`);
+  console.log(`Registered: ${stats.registered}`);
+  console.log(`Disabled: ${stats.disabled}\n`);
+
+  console.log('By Category:');
+  for (const [category, catStats] of Object.entries(stats.byCategory)) {
+    console.log(`\n${category.charAt(0).toUpperCase() + category.slice(1)} (${catStats.total} total):`);
+    console.log(`  Registered: ${catStats.registered}`);
+    console.log(`  Disabled: ${catStats.disabled}`);
+
+    // List tools in this category
+    const categoryTools = toolDefinitions.filter(t => t.category === category);
+    categoryTools.forEach(tool => {
+      const status = toolRegistry.isToolRegistered(tool.name) ? '✅' : '❌';
+      console.log(`  ${status} ${tool.name}`);
+    });
+  }
+}
+
 async function main() {
   try {
     const { values, positionals } = parseArgs({
       options: {
         'shell-type': { type: 'string', default: 'bash', short: 's' },
-        'help': { type: 'boolean', default: false, short: 'h' }
+        'help': { type: 'boolean', default: false, short: 'h' },
+        'config': { type: 'string' },
+        'disable-tools': { type: 'string' },
+        'enable-tools': { type: 'string' },
+        'validate-config': { type: 'boolean' },
+        'show-config': { type: 'boolean' },
+        'init-config': { type: 'string' },
+        'list-tools': { type: 'boolean' }
       },
       allowPositionals: true
     });
+
+    // Handle configuration management commands
+    if (values['validate-config']) {
+      await handleValidateConfig(values['config']);
+      return;
+    }
+
+    if (values['show-config']) {
+      await handleShowConfig();
+      return;
+    }
+
+    if (values['init-config']) {
+      await handleInitConfig(values['init-config']);
+      return;
+    }
+
+    if (values['list-tools']) {
+      await handleListTools();
+      return;
+    }
 
     // Handle CLI commands
     if (positionals.length > 0) {
@@ -1394,9 +1942,19 @@ async function main() {
       return;
     }
 
+    // Initialize configuration with CLI overrides
+    const configOptions = {
+      configPath: values['config'],
+      disabledTools: values['disable-tools'] ? values['disable-tools'].split(',') : undefined,
+      enabledTools: values['enable-tools'] ? values['enable-tools'].split(',') : undefined
+    };
+
+    const configManager = getConfigManager(configOptions);
+    const config = configManager.getConfig();
+
     // Set shell configuration
     tmux.setShellConfig({
-      type: values['shell-type'] as string
+      type: values['shell-type'] as string || config.cli.defaults?.shellType || 'bash'
     });
 
     // Check if tmux is running
@@ -1409,6 +1967,17 @@ async function main() {
 
       throw "Tmux server is not running";
     }
+
+    // Initialize tool registry and register configured tools
+    const toolRegistry = setupToolRegistry(server, config);
+
+    // Register all tool definitions
+    for (const toolDefinition of toolDefinitions) {
+      toolRegistry.registerTool(toolDefinition);
+    }
+
+    // Register enabled tools based on configuration
+    toolRegistry.registerEnabledTools();
 
     // Start the MCP server
     const transport = new StdioServerTransport();
