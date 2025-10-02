@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as tmux from "./tmux.js";
 import { commandLogger } from "./command-logger.js";
 import { CommandExecutor } from "./command-executor.js";
+import { getAtuinIntegration } from "./atuin-integration.js";
 
 const exec = promisify(execCallback);
 
@@ -76,6 +77,16 @@ export async function executeCommand(
   
   // Save to persistent storage immediately
   await commandLogger.logCommandStart(enhancedCommand);
+
+  // Save command to Atuin when it starts
+  let atuinCommandId: string | null = null;
+  try {
+    const atuin = getAtuinIntegration();
+    atuinCommandId = await atuin.saveCommandStart(command, commandId, enhancedCommand.currentWorkingDirectory);
+    console.log(`[DEBUG] Command started and saved to Atuin: ${command} (ID: ${atuinCommandId})`);
+  } catch (atuinError) {
+    console.log(`[DEBUG] Failed to save command start to Atuin: ${atuinError}`);
+  }
   
   try {
     // Create CommandExecutor instance (EXACT tabby-mcp approach)
@@ -139,6 +150,18 @@ export async function executeCommand(
         enhancedCommand.result = result.output;
         enhancedCommand.exitCode = result.exitCode ?? 0;
         console.log(`[DEBUG] Command ${commandId} completed with exit code ${enhancedCommand.exitCode}`);
+
+        // Update command in Atuin history with final results
+        if (atuinCommandId) {
+          try {
+            const atuin = getAtuinIntegration();
+            const duration = enhancedCommand.endTime ? enhancedCommand.endTime.getTime() - enhancedCommand.startTime.getTime() : 0;
+            await atuin.updateCommand(atuinCommandId, enhancedCommand.exitCode ?? 0, duration);
+            console.log(`[DEBUG] Command updated in Atuin: ${command} (ID: ${atuinCommandId})`);
+          } catch (atuinError) {
+            console.log(`[DEBUG] Failed to update command in Atuin: ${atuinError}`);
+          }
+        }
       } else if (result.commandStarted && !result.commandFinished) {
         // Fourth check: Command timed out (started but didn't finish)
         enhancedCommand.status = 'timeout';
@@ -169,6 +192,18 @@ Use 'wait-for-output' to continue monitoring or 'cancel-command' to stop`;
         enhancedCommand.status = 'completed';
         enhancedCommand.result = result.output;
         enhancedCommand.exitCode = result.exitCode ?? 0;
+
+        // Update command in Atuin history with final results (fallback)
+        if (atuinCommandId) {
+          try {
+            const atuin = getAtuinIntegration();
+            const duration = enhancedCommand.endTime ? enhancedCommand.endTime.getTime() - enhancedCommand.startTime.getTime() : 0;
+            await atuin.updateCommand(atuinCommandId, enhancedCommand.exitCode ?? 0, duration);
+            console.log(`[DEBUG] Command updated in Atuin (fallback): ${command} (ID: ${atuinCommandId})`);
+          } catch (atuinError) {
+            console.log(`[DEBUG] Failed to update command in Atuin (fallback): ${atuinError}`);
+          }
+        }
       } else if (result.commandStarted && !result.commandFinished) {
         enhancedCommand.status = 'timeout';
         enhancedCommand.result = `Command timed out\n\nOutput:\n${result.output || '(no output captured)'}`;
