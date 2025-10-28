@@ -7,6 +7,7 @@ import { z } from "zod";
 import * as tmux from "./tmux.js";
 import * as enhancedExecutor from "./enhanced-executor.js";
 import { commandLogger } from "./command-logger.js";
+import { CommandExecutor } from "./command-executor.js";
 import { InkTUIManager as TUIManager } from "./ink-tui-manager.js";
 import { FzfIntegration } from "./fzf-integration.js";
 import { getConfigManager, setupToolRegistry } from "./config/config-manager.js";
@@ -1519,7 +1520,31 @@ async function handleExecuteCommand(args: string[]) {
       detectShell: true // Auto-detect shell type
     });
 
-    console.log(`${commandId}`);
+    // Wait for command completion with polling
+    let attempts = 0;
+    const maxAttempts = Math.ceil(timeoutMs / 1000); // Poll every second
+    let finalOutput = '';
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+
+      const command = await enhancedExecutor.getEnhancedCommandStatus(commandId);
+
+      if (command && command.status === 'completed') {
+        finalOutput = command.result || '';
+        break;
+      } else if (command && (command.status === 'error' || command.status === 'cancelled')) {
+        finalOutput = command.result || `Command ${command.status}`;
+        break;
+      }
+    }
+
+    if (finalOutput.trim()) {
+      console.log(finalOutput.trim());
+    } else {
+      console.log(`Command completed (ID: ${commandId})`);
+    }
 
   } catch (error) {
     console.error(`Error: ${error}`);
