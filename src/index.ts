@@ -1540,10 +1540,25 @@ async function handleExecuteCommand(args: string[]) {
       }
     }
 
-    if (finalOutput.trim()) {
-      console.log(finalOutput.trim());
-    } else {
-      console.log(`Command completed (ID: ${commandId})`);
+    // Clean output by removing markers and metadata
+    let cleanOutput = finalOutput;
+    if (cleanOutput) {
+      // Remove tmux-mcp markers and exit codes
+      cleanOutput = cleanOutput
+        .split('\n')
+        .filter(line =>
+          !line.includes('_S') &&
+          !line.includes('_E') &&
+          !line.includes('exit_code:') &&
+          !line.includes('~') &&
+          !line.includes('❯')
+        )
+        .join('\n')
+        .trim();
+    }
+
+    if (cleanOutput) {
+      console.log(cleanOutput);
     }
 
   } catch (error) {
