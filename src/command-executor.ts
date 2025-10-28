@@ -8,12 +8,28 @@
 
 import { ShellContext, escapeShellString } from './shell-strategies.js';
 import * as tmux from './tmux.js';
+import { createLogger } from './logger.js';
+
+const logger = createLogger('command-executor');
 
 /**
  * Strip ANSI escape codes (simplified version for tmux)
  */
 function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+/**
+ * Extract text from a line before the end marker
+ * Returns the text portion before the marker, or empty line if only marker is present
+ */
+function extractTextBeforeEndMarker(line: string, endMarker: string): string {
+  const markerIndex = line.indexOf(endMarker);
+  if (markerIndex === -1) {
+    return line; // No marker found, return full line
+  }
+  const textBeforeMarker = line.substring(0, markerIndex);
+  return textBeforeMarker.trim();
 }
 
 /**
@@ -170,21 +186,21 @@ ${trimmedCommand}
       let endIndex = -1;
 
       // Debug: Log buffer content for troubleshooting
-      console.log(`[DEBUG] Looking for markers: start="${startMarker}", end="${endMarker}"`);
-      console.log(`[DEBUG] Buffer lines (last 5): ${lines.slice(-5).map((line, i) => `${lines.length - 5 + i}: ${line}`).join('\n')}`);
+      logger.debug('Looking for markers', { start: startMarker, end: endMarker });
+      logger.debug('Buffer lines (last 5)', { lines: lines.slice(-5).map((line, i) => `${lines.length - 5 + i}: ${line}`) });
 
       for (let i = lines.length - 1; i >= 0; i--) {
         if (lines[i].includes(startMarker)) {
           startIndex = i;
           commandStarted = true;
-          console.log(`[DEBUG] Found start marker at line ${i}: "${lines[i]}"`);
+          logger.debug('Found start marker', { line: i, content: lines[i] });
           
           // Look for end marker from this point forward
           for (let j = startIndex + 1; j < lines.length; j++) {
             if (lines[j].includes(endMarker)) {
               endIndex = j;
               commandFinished = true;
-              console.log(`[DEBUG] Found end marker at line ${j}: "${lines[j]}"`);
+              logger.debug('Found end marker', { line: j, content: lines[j] });
               break;
             }
           }
@@ -196,22 +212,36 @@ ${trimmedCommand}
       if (commandStarted && startIndex !== -1) {
         if (commandFinished && endIndex !== -1) {
           // Complete command - extract between start and end markers
-          const commandOutput = lines.slice(startIndex + 1, endIndex)
-            .filter((line: string) => !line.includes(startMarker) && !line.includes(endMarker))
-            .join('\n')
-            .trim();
+          // Include text from the end marker line before the marker
+          const extractedLines: string[] = [];
 
-          // Extract exit code if available 
+          // Extract lines between start and end markers (excluding start marker line)
+          for (let i = startIndex + 1; i < endIndex; i++) {
+            if (!lines[i].includes(startMarker) && !lines[i].includes(endMarker)) {
+              extractedLines.push(lines[i]);
+            }
+          }
+
+          // Extract text from the end marker line before the marker
+          const endMarkerLine = lines[endIndex];
+          const textBeforeEndMarker = extractTextBeforeEndMarker(endMarkerLine, endMarker);
+          if (textBeforeEndMarker && !textBeforeEndMarker.includes(startMarker)) {
+            extractedLines.push(textBeforeEndMarker);
+          }
+
+          const commandOutput = extractedLines.join('\n').trim();
+
+          // Extract exit code if available
           for (let i = endIndex; i < Math.min(endIndex + 5, lines.length); i++) {
             if (lines[i].startsWith('exit_code:')) {
               exitCode = parseInt(lines[i].split(':')[1].trim(), 10);
-              console.log(`[DEBUG] Found exit code: ${exitCode}`);
+              logger.debug('Found exit code', { exitCode });
               break;
             }
           }
 
           output = commandOutput;
-          console.log(`[DEBUG] Complete command output (${commandOutput.length} chars): ${commandOutput.substring(0, 200)}...`);
+          logger.debug('Complete command output', { length: commandOutput.length, preview: commandOutput.substring(0, 200) });
           break;
         } else {
           // Partial command (timeout case) - extract from start marker to end of buffer
@@ -221,7 +251,7 @@ ${trimmedCommand}
             .trim();
           
           output = partialOutput;
-          console.log(`[DEBUG] Partial command output (${partialOutput.length} chars): ${partialOutput.substring(0, 200)}...`);
+          logger.debug('Partial command output', { length: partialOutput.length, preview: partialOutput.substring(0, 200) });
           // Continue polling - don't break yet
         }
       }

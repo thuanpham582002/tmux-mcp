@@ -11,6 +11,7 @@ import { InkTUIManager as TUIManager } from "./ink-tui-manager.js";
 import { FzfIntegration } from "./fzf-integration.js";
 import { getConfigManager, setupToolRegistry } from "./config/config-manager.js";
 import { loadConfig } from "./config/config-loader.js";
+import { logger } from "./logger.js";
 
 // Create MCP server
 const server = new McpServer({
@@ -1319,6 +1320,7 @@ USAGE:
 
 COMMANDS:
   (none)              Start MCP server (default)
+  execute-command     Execute a command in a tmux pane
   command-running     Show currently running commands
   command-history     Show all commands including completed
   command-cancel ID   Cancel a running command by ID
@@ -1339,9 +1341,18 @@ CONFIGURATION OPTIONS:
 
 OPTIONS:
   --shell-type, -s    Shell type (bash, zsh, fish, sh) [default: bash]
+  --log-level         Log level (error, warn, info, debug) [default: warn]
+  --log-format        Log format (compact, detailed, json) [default: compact]
 
 EXAMPLES:
   tmux-mcp                           # Start MCP server with default config
+  tmux-mcp execute-command %0 "ls -la"     # Execute command (compact logging)
+  tmux-mcp execute-command %0 "ls -la" --log-level debug  # Execute with debug logging
+  tmux-mcp execute-command 0:1.0 "npm test" --timeout 60000 --log-level info   # 60s timeout with info logging
+  tmux-mcp execute-command %1 "make build" --timeout 300000 --log-format detailed  # 5min with detailed logging
+  tmux-mcp execute-command %2 "process" --timeout 0 --log-level debug --log-format json  # JSON logging
+  tmux-mcp command-running           # Show running commands
+  tmux-mcp command-cancel <ID>       # Cancel running command
   tmux-mcp --disable-tools send-keys-raw  # Disable dangerous tools
   tmux-mcp --enable-tools list-sessions,list-windows  # Whitelist mode
   tmux-mcp --disable-patterns "*-raw,session-*"  # Disable raw and session tools
@@ -1352,7 +1363,6 @@ EXAMPLES:
   tmux-mcp --show-config              # Show current configuration
   tmux-mcp --init-config              # Create default config file
   tmux-mcp --list-tools               # List available tools
-  tmux-mcp command-running           # CLI commands always available
   tmux-mcp interactive               # Interactive mode
 
 TMUX INTEGRATION:
@@ -1399,10 +1409,14 @@ async function handleCliCommand(command: string, args: string[], options: any) {
     await commandLogger.initialize();
     
     switch (command) {
+      case 'execute-command':
+        await handleExecuteCommand(args);
+        break;
+
       case 'command-running':
         await handleCommandRunning();
         break;
-        
+
       case 'command-history':
         await handleCommandHistory();
         break;
@@ -1453,6 +1467,62 @@ async function handleCliCommand(command: string, args: string[], options: any) {
     }
   } catch (error) {
     console.error(`Error executing command: ${error}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Execute a command in a tmux pane
+ */
+async function handleExecuteCommand(args: string[]) {
+  if (args.length < 2) {
+    console.error('❌ Pane ID and command are required');
+    console.error('Usage: tmux-mcp execute-command <pane-id> <command> [--timeout <ms>]');
+    console.error('');
+    console.error('Examples:');
+    console.error('  tmux-mcp execute-command %0 "ls -la"');
+    console.error('  tmux-mcp execute-command 0:1.0 "npm test" --timeout 60000');
+    console.error('  tmux-mcp execute-command mysession:1.0 "cd /path && pwd" --timeout 300000');
+    console.error('  tmux-mcp execute-command %1 "long-running-process" --timeout 0  # unlimited');
+    process.exit(1);
+  }
+
+  // Parse arguments to extract --timeout option
+  const timeoutIndex = args.findIndex(arg => arg === '--timeout');
+  let timeoutMs = 999999999; // Default unlimited
+  let commandArgs = [...args];
+
+  if (timeoutIndex !== -1) {
+    const timeoutValue = args[timeoutIndex + 1];
+    if (timeoutValue) {
+      const parsedTimeout = parseInt(timeoutValue);
+      if (isNaN(parsedTimeout) || parsedTimeout < 0) {
+        console.error('❌ Invalid timeout value. Use a positive number in milliseconds, or 0 for unlimited.');
+        process.exit(1);
+      }
+      timeoutMs = parsedTimeout === 0 ? 999999999 : parsedTimeout;
+      commandArgs = args.slice(0, timeoutIndex).concat(args.slice(timeoutIndex + 2));
+    } else {
+      console.error('❌ --timeout requires a value (milliseconds, or 0 for unlimited)');
+      process.exit(1);
+    }
+  }
+
+  const paneId = commandArgs[0];
+  const command = commandArgs.slice(1).join(' ');
+
+  try {
+    // Execute command using the enhanced executor
+    const commandId = await enhancedExecutor.executeCommand(paneId, command, {
+      timeout: timeoutMs,
+      maxRetries: 2,
+      detectShell: true // Auto-detect shell type
+    });
+
+    console.log(`${commandId}`);
+
+  } catch (error) {
+    console.error(`Error: ${error}`);
     process.exit(1);
   }
 }
@@ -1948,10 +2018,15 @@ async function main() {
         'validate-config': { type: 'boolean' },
         'show-config': { type: 'boolean' },
         'init-config': { type: 'string' },
-        'list-tools': { type: 'boolean' }
+        'list-tools': { type: 'boolean' },
+        'log-level': { type: 'string' },
+        'log-format': { type: 'string' }
       },
       allowPositionals: true
     });
+
+    // Initialize logger from CLI arguments and environment variables
+    logger.initializeFromEnv(values['log-level'], values['log-format']);
 
     // Handle configuration management commands
     if (values['validate-config']) {

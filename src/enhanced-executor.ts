@@ -5,8 +5,10 @@ import * as tmux from "./tmux.js";
 import { commandLogger } from "./command-logger.js";
 import { CommandExecutor } from "./command-executor.js";
 import { getAtuinIntegration } from "./atuin-integration.js";
+import { createLogger } from "./logger.js";
 
 const exec = promisify(execCallback);
+const logger = createLogger('enhanced-executor');
 
 export interface EnhancedCommandExecution {
   id: string;
@@ -83,9 +85,9 @@ export async function executeCommand(
   try {
     const atuin = getAtuinIntegration();
     atuinCommandId = await atuin.saveCommandStart(command, commandId, enhancedCommand.currentWorkingDirectory);
-    console.log(`[DEBUG] Command started and saved to Atuin: ${command} (ID: ${atuinCommandId})`);
+    logger.debug('Command saved to Atuin', { command, commandId: atuinCommandId });
   } catch (atuinError) {
-    console.log(`[DEBUG] Failed to save command start to Atuin: ${atuinError}`);
+    logger.debug('Failed to save command to Atuin', { error: atuinError });
   }
   
   try {
@@ -137,19 +139,19 @@ export async function executeCommand(
         enhancedCommand.status = 'cancelled';
         enhancedCommand.result = `Command cancelled by user request\n\nPartial Output:\n${result.output || '(no output captured)'}`;
         enhancedCommand.exitCode = -1; // Standard cancellation exit code
-        console.log(`[DEBUG] Command ${commandId} was cancelled externally`);
+        logger.debug('Command cancelled externally', { commandId });
       } else if (aborted) {
         // Second check: Was command aborted internally?
         enhancedCommand.status = 'cancelled';
         enhancedCommand.result = `Command aborted internally\n\nPartial Output:\n${result.output || '(no output captured)'}`;
         enhancedCommand.exitCode = -1; // Standard cancellation exit code
-        console.log(`[DEBUG] Command ${commandId} was aborted internally`);
+        logger.debug('Command aborted internally', { commandId });
       } else if (result.commandStarted && result.commandFinished) {
         // Third check: Command completed successfully
         enhancedCommand.status = 'completed';
         enhancedCommand.result = result.output;
         enhancedCommand.exitCode = result.exitCode ?? 0;
-        console.log(`[DEBUG] Command ${commandId} completed with exit code ${enhancedCommand.exitCode}`);
+        logger.debug('Command completed', { commandId, exitCode: enhancedCommand.exitCode });
 
         // Update command in Atuin history with final results
         if (atuinCommandId) {
@@ -157,9 +159,9 @@ export async function executeCommand(
             const atuin = getAtuinIntegration();
             const duration = enhancedCommand.endTime ? enhancedCommand.endTime.getTime() - enhancedCommand.startTime.getTime() : 0;
             await atuin.updateCommand(atuinCommandId, enhancedCommand.exitCode ?? 0, duration);
-            console.log(`[DEBUG] Command updated in Atuin: ${command} (ID: ${atuinCommandId})`);
+            logger.debug('Command updated in Atuin', { commandId: atuinCommandId, exitCode: enhancedCommand.exitCode, duration });
           } catch (atuinError) {
-            console.log(`[DEBUG] Failed to update command in Atuin: ${atuinError}`);
+            logger.debug('Failed to update command in Atuin', { error: atuinError });
           }
         }
       } else if (result.commandStarted && !result.commandFinished) {
@@ -177,13 +179,13 @@ ${result.output || '(no output captured)'}
 
 Use 'wait-for-output' to continue monitoring or 'cancel-command' to stop`;
         enhancedCommand.exitCode = 124; // Standard timeout exit code
-        console.log(`[DEBUG] Command ${commandId} timed out after ${timeout}ms`);
+        logger.debug('Command timed out', { commandId, timeout });
       } else {
         // Final check: Command failed to start or other error
         enhancedCommand.status = 'error';
         enhancedCommand.result = result.output || 'Failed to start command execution';
         enhancedCommand.exitCode = result.exitCode ?? 1;
-        console.log(`[DEBUG] Command ${commandId} failed to start or had error`);
+        logger.debug('Command failed to start or had error', { commandId });
       }
     } catch (error) {
       console.warn(`Could not check persistent storage for command ${commandId}, using result-based status:`, error);
@@ -199,9 +201,9 @@ Use 'wait-for-output' to continue monitoring or 'cancel-command' to stop`;
             const atuin = getAtuinIntegration();
             const duration = enhancedCommand.endTime ? enhancedCommand.endTime.getTime() - enhancedCommand.startTime.getTime() : 0;
             await atuin.updateCommand(atuinCommandId, enhancedCommand.exitCode ?? 0, duration);
-            console.log(`[DEBUG] Command updated in Atuin (fallback): ${command} (ID: ${atuinCommandId})`);
+            logger.debug('Command updated in Atuin', { commandId: atuinCommandId, exitCode: enhancedCommand.exitCode, duration });
           } catch (atuinError) {
-            console.log(`[DEBUG] Failed to update command in Atuin (fallback): ${atuinError}`);
+            logger.debug('Failed to update command in Atuin', { error: atuinError });
           }
         }
       } else if (result.commandStarted && !result.commandFinished) {

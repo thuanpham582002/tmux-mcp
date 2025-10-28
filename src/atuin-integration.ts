@@ -3,8 +3,10 @@ import { promisify } from "util";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
+import { createLogger } from "./logger.js";
 
 const exec = promisify(execCallback);
+const logger = createLogger('atuin-integration');
 
 export interface AtuinHistoryEntry {
   command: string;
@@ -122,11 +124,11 @@ VALUES ('${id}', ${timestampNanos}, ${entry.duration}, ${entry.exit}, '${escaped
 EOF`;
 
       await exec(insertCmd);
-      console.log(`Command saved to Atuin: ${entry.command}`);
+      logger.debug('Command saved to Atuin', { command: entry.command, id });
       return id;
     } catch (error) {
       // Log error but don't throw - we don't want to break command execution
-      console.error('Failed to save command to Atuin:', error);
+      logger.error('Failed to save command to Atuin', { error, command: entry.command });
       return null;
     }
   }
@@ -148,9 +150,9 @@ EOF`;
 UPDATE history SET exit = ${exitCode}, duration = ${duration} WHERE id = '${escapedCommandId}';
 EOF`;
       await exec(updateCmd);
-      console.log(`Command updated in Atuin: ${commandId} (exit: ${exitCode}, duration: ${duration}ms)`);
+      logger.debug('Command updated in Atuin', { commandId, exitCode, duration });
     } catch (error) {
-      console.error('Failed to update command in Atuin:', error);
+      logger.error('Failed to update command in Atuin', { error, commandId });
     }
   }
 

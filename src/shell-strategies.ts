@@ -1,7 +1,10 @@
 /**
- * Shell strategy system - EXACT copy from tabby-mcp 
+ * Shell strategy system - EXACT copy from tabby-mcp
  * This implements the exact same trap mechanism as tabby-mcp/src/features/terminal/tools/strategies/shell-strategy.ts
  */
+
+import { createLogger } from './logger.js';
+const logger = createLogger('shell-strategies');
 
 /**
  * Strip ANSI escape codes (simplified version)
@@ -206,19 +209,19 @@ export class ShellContext {
           const parts = line.split('=');
           if (parts.length >= 2) {
             shellType = parts[1].trim();
-            console.log(`[DEBUG] Raw detected shell type: "${shellType}"`);
+            logger.debug('Detected shell type', { shellType });
           }
         } else if (line && line.startsWith('PWD_PATH=')) {
           const parts = line.split('=');
           if (parts.length >= 2) {
             currentWorkingDirectory = parts[1].trim();
-            console.log(`[DEBUG] Raw detected pwd: "${currentWorkingDirectory}"`);
+            logger.debug('Detected pwd', { currentWorkingDirectory });
           }
         } else if (line && line.startsWith('SYSTEM_INFO=')) {
           const parts = line.split('=', 2); // Only split on first = to preserve spaces in system info
           if (parts.length >= 2) {
             systemInfo = parts[1].trim();
-            console.log(`[DEBUG] Raw detected system info: "${systemInfo}"`);
+            logger.debug('Detected system info', { systemInfo });
           }
         }
       }
