@@ -1698,14 +1698,169 @@ async function handleCommandCleanup() {
 /**
  * fzf-powered active commands interface
  */
+async function handleFzfActiveCommands() {
+  try {
+    const fzf = new FzfIntegration();
+    
+    // Check if fzf is available
+    if (!await fzf.checkFzfAvailable()) {
+      console.error('❌ fzf is not available. Install it with: brew install fzf');
+      process.exit(1);
+    }
+    
+    console.log('🔄 Loading active commands...');
+    
+    // Check if we have any commands first
+    const activeCommands = await enhancedExecutor.listActiveCommands();
+    console.log(`Found ${activeCommands.length} active commands`);
+    
+    if (activeCommands.length === 0) {
+      console.log('📝 No active commands found.');
+      console.log('💡 Tip: Commands executed through MCP tools will appear here.');
+      console.log('🚀 Try the modern TUI instead: node build/index.js interactive');
+      return;
+    }
+    
+    const result = await fzf.showActiveCommands();
+    
+    if (result.cancelled) {
+      console.log('Operation cancelled.');
+      return;
+    }
+    
+    if (result.selected.length === 0) {
+      console.log('No commands selected.');
+      return;
+    }
+    
+    // Process selections
+    console.log(`\n✅ Selected ${result.selected.length} command(s):`);
+    for (const selection of result.selected) {
+      const commandId = fzf.parseSelection(selection);
+      console.log(`  • ${selection}`);
+      console.log(`    Command ID: ${commandId}`);
+    }
+    
+  } catch (error) {
+    console.error('Error in fzf active commands:', error);
+    process.exit(1);
+  }
+}
 
 /**
  * fzf-powered command history interface
  */
+async function handleFzfHistory() {
+  try {
+    const fzf = new FzfIntegration();
+    
+    // Check if fzf is available
+    if (!await fzf.checkFzfAvailable()) {
+      console.error('❌ fzf is not available. Install it with: brew install fzf');
+      process.exit(1);
+    }
+    
+    console.log('📚 Loading command history...');
+    
+    // Check if we have any commands first
+    const historyCommands = await enhancedExecutor.listAllCommands();
+    if (historyCommands.length === 0) {
+      console.log('📝 No command history found. Try running some commands first.');
+      console.log('   Use: node build/index.js execute-command <pane-id> <command>');
+      return;
+    }
+    
+    const result = await fzf.showCommandHistory();
+    
+    if (result.cancelled) {
+      console.log('Operation cancelled.');
+      return;
+    }
+    
+    if (result.selected.length === 0) {
+      console.log('No command selected.');
+      return;
+    }
+    
+    // Show selected command details
+    const selection = result.selected[0];
+    const commandId = fzf.parseSelection(selection);
+    
+    const searchCommands = await enhancedExecutor.listAllCommands();
+    const command = searchCommands.find(cmd => cmd.id.startsWith(commandId));
+    
+    if (command) {
+      console.log('\n📋 Command Details:');
+      console.log('='.repeat(50));
+      console.log(`Command: ${command.command}`);
+      console.log(`ID:      ${command.id}`);
+      console.log(`Status:  ${command.status.toUpperCase()}`);
+      console.log(`Pane:    ${command.paneId}`);
+      if (command.shellType) console.log(`Shell:   ${command.shellType}`);
+      if (command.currentWorkingDirectory) console.log(`Dir:     ${command.currentWorkingDirectory}`);
+      if (command.exitCode !== undefined) console.log(`Exit:    ${command.exitCode}`);
+      console.log(`Started: ${new Date(command.startTime).toLocaleString()}`);
+      if (command.endTime) console.log(`Ended:   ${new Date(command.endTime).toLocaleString()}`);
+      
+      if (command.result) {
+        console.log('\n--- Output ---');
+        console.log(command.result.length > 1000 
+          ? command.result.substring(0, 1000) + '\n... (truncated)'
+          : command.result
+        );
+      }
+    } else {
+      console.log('❌ Command not found');
+    }
+    
+  } catch (error) {
+    console.error('Error in fzf history:', error);
+    process.exit(1);
+  }
+}
 
 /**
  * fzf-powered smart search interface
  */
+async function handleFzfSearch() {
+  try {
+    await commandLogger.initialize();
+    
+    const fzf = new FzfIntegration();
+    
+    // Check if fzf is available
+    if (!await fzf.checkFzfAvailable()) {
+      console.error('❌ fzf is not available. Install it with: brew install fzf');
+      process.exit(1);
+    }
+    
+    console.log('🔍 Starting smart search...');
+    
+    const result = await fzf.smartSearch();
+    
+    if (result.cancelled) {
+      console.log('Search cancelled.');
+      return;
+    }
+    
+    if (result.selected.length === 0) {
+      console.log('No results found.');
+      return;
+    }
+    
+    // Display search results
+    console.log(`\n🎯 Search Results (${result.selected.length} found):`);
+    console.log('='.repeat(60));
+    
+    for (const selection of result.selected) {
+      console.log(`  ${selection}`);
+    }
+    
+  } catch (error) {
+    console.error('Error in fzf search:', error);
+    process.exit(1);
+  }
+}
 
 /**
  * Validate configuration file
@@ -1973,10 +2128,331 @@ async function main() {
 /**
  * Modern TUI command management mode
  */
+async function handleModernTUI() {
+  // Check if we're in a TTY or tmux environment
+  const isTmuxEnvironment = !!process.env.TMUX;
+  if (!process.stdin.isTTY && !isTmuxEnvironment) {
+    console.log('Interactive mode requires a TTY or tmux environment.');
+    return;
+  }
+
+  try {
+    await commandLogger.initialize();
+    
+    const tui = new TUIManager({
+      title: 'TMUX MCP - Advanced Command Manager',
+      refreshInterval: 1000,
+      enableMouse: false,
+      vimMode: true
+    });
+    
+    await tui.start();
+    
+    // Setup cleanup on exit
+    process.on('SIGINT', () => {
+      tui.cleanup();
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', () => {
+      tui.cleanup();
+      process.exit(0);
+    });
+    
+  } catch (error) {
+    console.error('Error starting modern TUI:', error);
+    process.exit(1);
+  }
+}
 
 /**
  * Legacy interactive command management mode (backwards compatibility)
  */
+async function handleInteractiveLegacyMode() {
+  console.log('\x1b[2J\x1b[H'); // Clear screen
+  console.log('🎛️  TMUX MCP - Interactive Command Manager\n');
+  
+  // Check if we're in a TTY or tmux environment (tmux popup doesn't report isTTY properly)
+  const isTmuxEnvironment = !!process.env.TMUX;
+  if (!process.stdin.isTTY && !isTmuxEnvironment) {
+    console.log('Interactive mode requires a TTY or tmux environment. Use individual commands instead.');
+    return;
+  }
+
+  const { createInterface } = await import('readline');
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  let running = true;
+
+  const showMenu = () => {
+    console.log('\x1b[2J\x1b[H'); // Clear screen
+    console.log('🎛️  TMUX MCP - Interactive Command Manager');
+    console.log('==========================================\n');
+    console.log('Options:');
+    console.log('  [1] Show running commands');
+    console.log('  [2] Show command history');
+    console.log('  [3] Search history with fzf 🔍');
+    console.log('  [4] Cancel a command');
+    console.log('  [5] Cleanup old commands');
+    console.log('  [q] Quit\n');
+  };
+
+  const showRunningCommands = async () => {
+    console.log('\x1b[2J\x1b[H');
+    console.log('🏃 Active Commands\n');
+    
+    const activeCommands = await enhancedExecutor.listActiveCommands();
+    if (activeCommands.length === 0) {
+      console.log('No active commands currently running.\n');
+    } else {
+      activeCommands.forEach((cmd, index) => {
+        const status = cmd.status === 'running' ? '🔄' : '⏳';
+        console.log(`${status} [${index + 1}] ${cmd.command} (ID: ${cmd.id.substring(0, 8)})`);
+        console.log(`    Pane: ${cmd.paneId} | Started: ${new Date(cmd.startTime).toLocaleTimeString()}\n`);
+      });
+    }
+    
+    console.log('Press Enter to return to menu...');
+    await new Promise(resolve => rl.once('line', resolve));
+  };
+
+  const showCommandHistory = async () => {
+    console.log('\x1b[2J\x1b[H');
+    console.log('📜 Command History\n');
+    
+    const allCommands = await enhancedExecutor.listAllCommands();
+    if (allCommands.length === 0) {
+      console.log('No commands found in history.\n');
+    } else {
+      allCommands.slice(0, 10).forEach((cmd, index) => {
+        const statusIcon = cmd.status === 'completed' ? '✅' : 
+                          cmd.status === 'error' ? '❌' : 
+                          cmd.status === 'running' ? '🔄' : '⏳';
+        console.log(`${statusIcon} [${index + 1}] ${cmd.command}`);
+        console.log(`    ID: ${cmd.id.substring(0, 8)} | ${cmd.status.toUpperCase()}`);
+        if (cmd.endTime) {
+          const duration = new Date(cmd.endTime).getTime() - new Date(cmd.startTime).getTime();
+          console.log(`    Duration: ${Math.round(duration / 1000)}s\n`);
+        } else {
+          console.log(`    Started: ${new Date(cmd.startTime).toLocaleTimeString()}\n`);
+        }
+      });
+      
+      if (allCommands.length > 10) {
+        console.log(`... and ${allCommands.length - 10} more commands\n`);
+      }
+    }
+    
+    console.log('Press Enter to return to menu...');
+    await new Promise(resolve => rl.once('line', resolve));
+  };
+
+  const searchHistoryWithFzf = async () => {
+    console.log('\x1b[2J\x1b[H');
+    console.log('🔍 Search Command History with fzf\n');
+    
+    try {
+      const allCommands = await enhancedExecutor.listAllCommands();
+      if (allCommands.length === 0) {
+        console.log('No commands found in history.\n');
+        console.log('Press Enter to return to menu...');
+        await new Promise(resolve => rl.once('line', resolve));
+        return;
+      }
+
+      // Prepare fzf input data
+      const fzfData = allCommands.map((cmd, index) => {
+        const statusIcon = cmd.status === 'completed' ? '✅' : 
+                          cmd.status === 'error' ? '❌' : 
+                          cmd.status === 'running' ? '🔄' : 
+                          cmd.status === 'cancelled' ? '🚫' : '⏳';
+        const duration = cmd.endTime 
+          ? Math.round((new Date(cmd.endTime).getTime() - new Date(cmd.startTime).getTime()) / 1000)
+          : Math.round((Date.now() - new Date(cmd.startTime).getTime()) / 1000);
+        const timeStr = new Date(cmd.startTime).toLocaleString();
+        
+        return `${statusIcon} ${cmd.command} | ID: ${cmd.id.substring(0, 8)} | ${cmd.status.toUpperCase()} | ${duration}s | ${timeStr}`;
+      }).join('\n');
+
+      // Use fzf to select command
+      const { spawn } = await import('child_process');
+      
+      console.log('🔍 Use fzf to search and select a command...\n');
+      
+      const fzfProcess = spawn('/opt/homebrew/bin/fzf', [
+        '--height=80%',
+        '--layout=reverse',
+        '--border',
+        '--prompt=Search Command History > ',
+        '--preview-window=down:3:wrap',
+        '--preview=echo "Command Details:" && echo {} | cut -d"|" -f1',
+        '--header=Use arrows to navigate, Enter to select details, Esc to cancel'
+      ], {
+        stdio: ['pipe', 'pipe', 'inherit']
+      });
+
+      // Send data to fzf
+      fzfProcess.stdin?.write(fzfData);
+      fzfProcess.stdin?.end();
+
+      let selectedLine = '';
+      fzfProcess.stdout?.on('data', (data) => {
+        selectedLine += data.toString();
+      });
+
+      await new Promise((resolve) => {
+        fzfProcess.on('close', (code) => {
+          if (code === 0 && selectedLine.trim()) {
+            // Extract command ID from selected line
+            const match = selectedLine.match(/ID: ([a-f0-9]{8})/);
+            if (match) {
+              const commandId = match[1];
+              const fullCommand = allCommands.find(cmd => cmd.id.startsWith(commandId));
+              
+              if (fullCommand) {
+                console.log('\x1b[2J\x1b[H');
+                console.log('📋 Selected Command Details\n');
+                console.log('==========================================\n');
+                console.log(`Command: ${fullCommand.command}`);
+                console.log(`ID: ${fullCommand.id}`);
+                console.log(`Status: ${fullCommand.status.toUpperCase()}`);
+                console.log(`Pane: ${fullCommand.paneId}`);
+                if (fullCommand.shellType) console.log(`Shell: ${fullCommand.shellType}`);
+                if (fullCommand.currentWorkingDirectory) console.log(`Directory: ${fullCommand.currentWorkingDirectory}`);
+                if (fullCommand.exitCode !== undefined) console.log(`Exit Code: ${fullCommand.exitCode}`);
+                console.log(`Started: ${new Date(fullCommand.startTime).toLocaleString()}`);
+                if (fullCommand.endTime) console.log(`Ended: ${new Date(fullCommand.endTime).toLocaleString()}`);
+                
+                const duration = fullCommand.endTime 
+                  ? new Date(fullCommand.endTime).getTime() - new Date(fullCommand.startTime).getTime()
+                  : Date.now() - new Date(fullCommand.startTime).getTime();
+                console.log(`Duration: ${Math.round(duration / 1000)}s`);
+                
+                if (fullCommand.result) {
+                  console.log('\n--- Output ---');
+                  // Truncate long output
+                  const output = fullCommand.result.length > 500 
+                    ? fullCommand.result.substring(0, 500) + '\n... (truncated)'
+                    : fullCommand.result;
+                  console.log(output);
+                }
+                console.log('\n==========================================');
+              }
+            }
+          } else {
+            console.log('No command selected or cancelled.');
+          }
+          resolve(code);
+        });
+      });
+      
+    } catch (error) {
+      console.log(`❌ Error running fzf: ${error}`);
+      console.log('Make sure fzf is installed: brew install fzf');
+    }
+    
+    console.log('\nPress Enter to return to menu...');
+    await new Promise(resolve => rl.once('line', resolve));
+  };
+
+  const cancelCommand = async () => {
+    console.log('\x1b[2J\x1b[H');
+    console.log('🚫 Cancel Command\n');
+    
+    const activeCommands = await enhancedExecutor.listActiveCommands();
+    if (activeCommands.length === 0) {
+      console.log('No active commands to cancel.\n');
+      console.log('Press Enter to return to menu...');
+      await new Promise(resolve => rl.once('line', resolve));
+      return;
+    }
+
+    console.log('Active commands:');
+    activeCommands.forEach((cmd, index) => {
+      console.log(`  [${index + 1}] ${cmd.command} (${cmd.id.substring(0, 8)})`);
+    });
+    
+    console.log('\nEnter command number to cancel (or press Enter to return):');
+    const answer = await new Promise<string>(resolve => rl.once('line', resolve));
+    
+    const cmdIndex = parseInt(answer.trim()) - 1;
+    if (cmdIndex >= 0 && cmdIndex < activeCommands.length) {
+      const cmd = activeCommands[cmdIndex];
+      const success = await enhancedExecutor.cancelCommand(cmd.id);
+      console.log(success ? '✅ Command cancelled successfully!' : '❌ Failed to cancel command');
+    } else if (answer.trim() !== '') {
+      console.log('❌ Invalid selection');
+    }
+    
+    if (answer.trim() !== '') {
+      console.log('\nPress Enter to return to menu...');
+      await new Promise(resolve => rl.once('line', resolve));
+    }
+  };
+
+  const cleanupCommands = async () => {
+    console.log('\x1b[2J\x1b[H');
+    console.log('🧹 Cleanup Old Commands\n');
+    
+    const beforeCount = (await enhancedExecutor.listAllCommands()).length;
+    console.log(`Found ${beforeCount} commands in history.`);
+    console.log('Clean up commands older than 1 hour? (y/N):');
+    
+    const answer = await new Promise<string>(resolve => rl.once('line', resolve));
+    
+    if (answer.trim().toLowerCase() === 'y') {
+      enhancedExecutor.cleanupOldCommands(60);
+      const afterCount = (await enhancedExecutor.listAllCommands()).length;
+      const cleanedCount = beforeCount - afterCount;
+      console.log(`✅ Cleanup completed! Removed ${cleanedCount} old commands.`);
+    } else {
+      console.log('Cleanup cancelled.');
+    }
+    
+    console.log('\nPress Enter to return to menu...');
+    await new Promise(resolve => rl.once('line', resolve));
+  };
+
+  while (running) {
+    showMenu();
+    console.log('Choose an option:');
+    
+    const choice = await new Promise<string>(resolve => rl.once('line', resolve));
+    
+    switch (choice.trim()) {
+      case '1':
+        await showRunningCommands();
+        break;
+      case '2':
+        await showCommandHistory();
+        break;
+      case '3':
+        await searchHistoryWithFzf();
+        break;
+      case '4':
+        await cancelCommand();
+        break;
+      case '5':
+        await cleanupCommands();
+        break;
+      case 'q':
+      case 'quit':
+      case 'exit':
+        running = false;
+        break;
+      default:
+        console.log('Invalid option. Press Enter to try again...');
+        await new Promise(resolve => rl.once('line', resolve));
+        break;
+    }
+  }
+  
+  rl.close();
+  console.log('👋 Goodbye!');
+}
 
 main().catch(error => {
   console.error("Fatal error:", error);
