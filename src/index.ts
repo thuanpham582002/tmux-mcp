@@ -168,7 +168,7 @@ async function handleCliCommand(command: string, args: string[], options: any) {
   try {
     switch (command) {
       case 'execute-command':
-        await handleExecuteCommand(args);
+        await handleExecuteCommand(args, options);
         break;
 
       case 'send-keys-raw':
@@ -199,7 +199,7 @@ async function handleCliCommand(command: string, args: string[], options: any) {
 /**
  * Execute a command in a tmux pane
  */
-async function handleExecuteCommand(args: string[]) {
+async function handleExecuteCommand(args: string[], options: any = {}) {
   if (args.length < 2) {
     console.error('❌ Pane ID and command are required');
     console.error('Usage: tmux-mcp execute-command <pane-id> <command> [--timeout <ms>]');
@@ -212,24 +212,34 @@ async function handleExecuteCommand(args: string[]) {
     process.exit(1);
   }
 
-  // Parse arguments to extract --timeout option
-  const timeoutIndex = args.findIndex(arg => arg === '--timeout');
+  // Get timeout from options or parse from args (backward compatibility)
   let timeoutMs = 999999999; // Default unlimited
   let commandArgs = [...args];
 
-  if (timeoutIndex !== -1) {
-    const timeoutValue = args[timeoutIndex + 1];
-    if (timeoutValue) {
-      const parsedTimeout = parseInt(timeoutValue);
-      if (isNaN(parsedTimeout) || parsedTimeout < 0) {
-        console.error('❌ Invalid timeout value. Use a positive number in milliseconds, or 0 for unlimited.');
+  if (options.timeout) {
+    const parsedTimeout = parseInt(options.timeout);
+    if (isNaN(parsedTimeout) || parsedTimeout < 0) {
+      console.error('❌ Invalid timeout value. Use a positive number in milliseconds, or 0 for unlimited.');
+      process.exit(1);
+    }
+    timeoutMs = parsedTimeout === 0 ? 999999999 : parsedTimeout;
+  } else {
+    // Parse arguments to extract --timeout option (legacy support)
+    const timeoutIndex = args.findIndex(arg => arg === '--timeout');
+    if (timeoutIndex !== -1) {
+      const timeoutValue = args[timeoutIndex + 1];
+      if (timeoutValue) {
+        const parsedTimeout = parseInt(timeoutValue);
+        if (isNaN(parsedTimeout) || parsedTimeout < 0) {
+          console.error('❌ Invalid timeout value. Use a positive number in milliseconds, or 0 for unlimited.');
+          process.exit(1);
+        }
+        timeoutMs = parsedTimeout === 0 ? 999999999 : parsedTimeout;
+        commandArgs = args.slice(0, timeoutIndex).concat(args.slice(timeoutIndex + 2));
+      } else {
+        console.error('❌ --timeout requires a value (milliseconds, or 0 for unlimited)');
         process.exit(1);
       }
-      timeoutMs = parsedTimeout === 0 ? 999999999 : parsedTimeout;
-      commandArgs = args.slice(0, timeoutIndex).concat(args.slice(timeoutIndex + 2));
-    } else {
-      console.error('❌ --timeout requires a value (milliseconds, or 0 for unlimited)');
-      process.exit(1);
     }
   }
 
@@ -356,7 +366,8 @@ async function main() {
     const { values, positionals } = parseArgs({
       options: {
         'shell-type': { type: 'string', default: 'bash', short: 's' },
-        'help': { type: 'boolean', default: false, short: 'h' }
+        'help': { type: 'boolean', default: false, short: 'h' },
+        'timeout': { type: 'string' }
       },
       allowPositionals: true
     });
