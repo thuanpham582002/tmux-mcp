@@ -182,33 +182,51 @@ ${trimmedCommand}
       const lines = cleanTextAfter.split('\n');
 
       // Find start and end markers - use includes() since markers can appear anywhere in line
-      let startIndex = -1;
-      let endIndex = -1;
+    // Step 1: Find endMarker from bottom up first
+    let endIndex = -1;
+    let startIndex = -1;
 
-      // Debug: Log buffer content for troubleshooting
-      logger.debug('Looking for markers', { start: startMarker, end: endMarker });
-      logger.debug('Buffer lines (last 5)', { lines: lines.slice(-5).map((line, i) => `${lines.length - 5 + i}: ${line}`) });
+    // Debug: Log buffer content for troubleshooting
+    logger.debug('Looking for markers', { start: startMarker, end: endMarker });
+    logger.debug('Buffer lines (last 5)', { lines: lines.slice(-5).map((line, i) => `${lines.length - 5 + i}: ${line}`) });
 
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].includes(startMarker)) {
-          startIndex = i;
-          commandStarted = true;
-          logger.debug('Found start marker', { line: i, content: lines[i] });
-          
-          // Look for end marker from this point forward
-          for (let j = startIndex + 1; j < lines.length; j++) {
-            if (lines[j].includes(endMarker)) {
-              endIndex = j;
-              commandFinished = true;
-              logger.debug('Found end marker', { line: j, content: lines[j] });
-              break;
-            }
-          }
-          break;
-        }
+    // Step 1: Find endMarker from bottom up
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].includes(endMarker)) {
+        endIndex = i;
+        commandFinished = true;
+        logger.debug('Found end marker', { line: i, content: lines[i] });
+        break;
       }
+    }
 
-      // Extract output between markers 
+    // If no endMarker found, continue polling in next while loop iteration
+    if (endIndex === -1) {
+      logger.debug('No end marker found, continuing to poll');
+      continue;
+    }
+
+    // Step 2: Find startMarker from endIndex-1 going up
+    for (let j = endIndex - 1; j >= 0; j--) {
+      if (lines[j].includes(startMarker)) {
+        startIndex = j;
+        commandStarted = true;
+        logger.debug('Found start marker', { line: j, content: lines[j] });
+        break;
+      }
+    }
+
+    // If no startMarker found, take last 250 lines as fallback
+    if (startIndex === -1) {
+      logger.debug('No start marker found, using last 250 lines as fallback');
+      const fallbackLines = lines.slice(-250);
+      output = fallbackLines.join('\n').trim();
+      commandStarted = true; // Assume command started
+      // Since we have endMarker, command is finished
+      break;
+    }
+
+    // Extract output between markers 
       if (commandStarted && startIndex !== -1) {
         if (commandFinished && endIndex !== -1) {
           // Complete command - extract between start and end markers
@@ -255,6 +273,11 @@ ${trimmedCommand}
           // Continue polling - don't break yet
         }
       }
+    }
+
+    // Handle empty output
+    if (!output || output.trim() === '') {
+      output = 'executed';
     }
 
     return { output, exitCode, commandStarted, commandFinished };

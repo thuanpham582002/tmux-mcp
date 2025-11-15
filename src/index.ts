@@ -283,7 +283,6 @@ async function handleExecuteCommand(args: string[], options: any = {}) {
         .filter(line =>
           !line.includes('_S') &&
           !line.includes('_E') &&
-          !line.includes('exit_code:') &&
           !line.includes('~') &&
           !line.includes('❯')
         )

@@ -230,7 +230,6 @@ export class ShellContext {
         return { shellType, currentWorkingDirectory, systemInfo: systemInfo || undefined };
       }
 
-      console.warn('[DEBUG] Missing SHELL_TYPE or PWD_PATH pattern in terminal output');
       return null;
     } catch (error) {
       console.error('[DEBUG] Error detecting shell type and pwd:', error);
