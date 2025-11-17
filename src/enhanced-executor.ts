@@ -25,11 +25,6 @@ export interface EnhancedCommandExecution {
   currentWorkingDirectory?: string;
 }
 
-// Note: Enhanced command tracking now uses persistent storage only
-// Memory-based tracking removed in favor of consistent persistent storage
-
-export type ShellType = 'bash' | 'zsh' | 'fish' | 'sh' | 'unknown';
-
 // Helper function to convert CommandLogEntry to EnhancedCommandExecution
 function logEntryToCommand(entry: any): EnhancedCommandExecution {
   return {
@@ -48,14 +43,11 @@ function logEntryToCommand(entry: any): EnhancedCommandExecution {
   };
 }
 
-// Shell detection is handled by CommandExecutor using shell-strategies.ts
-// Legacy shell detection code removed - modern implementation in CommandExecutor.executeShellDetection()
-
 /**
- * Command execution with EXACT tabby-mcp 3-stage trap logic
+ * Simplified command execution with single end-marker approach
  */
 export async function executeCommand(
-  paneId: string, 
+  paneId: string,
   command: string,
   options: {
     maxRetries?: number;
@@ -64,8 +56,8 @@ export async function executeCommand(
   } = {}
 ): Promise<string> {
   const commandId = uuidv4();
-  const { maxRetries = 3, timeout, detectShell = true } = options;
-  
+  const { maxRetries = 3, timeout } = options;
+
   // Initialize enhanced command tracking
   const enhancedCommand: EnhancedCommandExecution = {
     id: commandId,
@@ -76,7 +68,7 @@ export async function executeCommand(
     aborted: false,
     retryCount: 0
   };
-  
+
   // Save to persistent storage immediately
   await commandLogger.logCommandStart(enhancedCommand);
 
@@ -89,65 +81,46 @@ export async function executeCommand(
   } catch (atuinError) {
     logger.debug('Failed to save command to Atuin', { error: atuinError });
   }
-  
+
   try {
-    // Create CommandExecutor instance (EXACT tabby-mcp approach)
+    // Create CommandExecutor instance
     const commandExecutor = new CommandExecutor();
-    
-    // Generate markers - EXACT tabby-mcp format
-    const timestamp = Date.now();
-    const startMarker = `_S${timestamp}`;
-    const endMarker = `_E${timestamp}`;
-    
+
+    // Generate single end marker - just use timestamp
+    const timestamp = Date.now().toString();
+    const endMarker = timestamp;
+
     // Set up command tracking with abort handler
     let aborted = false;
     const abortHandler = () => { aborted = true; };
-    
-    // Step 1: Execute shell detection - EXACT tabby-mcp flow
+
+    // Mark command as running
     enhancedCommand.status = 'running';
     await commandLogger.logCommandUpdate(enhancedCommand);
-    
-    const { shellDetectionResult, attempts, maxAttempts } = await commandExecutor.executeShellDetection(
-      paneId, command, startMarker
-    );
-    
-    if (!shellDetectionResult) {
-      enhancedCommand.status = 'error';
-      enhancedCommand.result = `Failed to detect shell type after ${maxAttempts} attempts`;
-      enhancedCommand.endTime = new Date();
-      await commandLogger.logCommandUpdate(enhancedCommand);
-      throw new Error(`Failed to detect shell type after ${maxAttempts} attempts`);
-    }
-    
-    // Update command with shell detection results
-    enhancedCommand.shellType = shellDetectionResult.shellType as any;
-    enhancedCommand.currentWorkingDirectory = shellDetectionResult.currentWorkingDirectory;
-    
-    // Step 2: Send setup script after successful shell detection - EXACT tabby-mcp flow
-    await commandExecutor.sendSetupScript(paneId, shellDetectionResult, startMarker, endMarker);
-    
-    // Step 3: Wait for command completion - EXACT tabby-mcp flow
+
+    // Step 1: Execute command directly with end marker
+    await commandExecutor.executeCommand(paneId, command, endMarker);
+
+    // Step 2: Wait for command completion
     const result = await commandExecutor.waitForCommandCompletion(
-      paneId, startMarker, endMarker, () => aborted, timeout, commandId
+      paneId, endMarker, () => aborted, timeout, commandId
     );
-    
+
     // Process results with clear status priority: cancelled > timeout > running > completed
-    // First check: Was command cancelled externally?
     try {
       const persistentCommand = await commandLogger.getCommandById(commandId);
       if (persistentCommand && persistentCommand.status === 'cancelled') {
         enhancedCommand.status = 'cancelled';
         enhancedCommand.result = `Command cancelled by user request\n\nPartial Output:\n${result.output || '(no output captured)'}`;
-        enhancedCommand.exitCode = -1; // Standard cancellation exit code
+        enhancedCommand.exitCode = -1;
         logger.debug('Command cancelled externally', { commandId });
       } else if (aborted) {
-        // Second check: Was command aborted internally?
         enhancedCommand.status = 'cancelled';
         enhancedCommand.result = `Command aborted internally\n\nPartial Output:\n${result.output || '(no output captured)'}`;
-        enhancedCommand.exitCode = -1; // Standard cancellation exit code
+        enhancedCommand.exitCode = -1;
         logger.debug('Command aborted internally', { commandId });
       } else if (result.commandStarted && result.commandFinished) {
-        // Third check: Command completed successfully
+        // Command completed successfully
         enhancedCommand.status = 'completed';
         enhancedCommand.result = result.output;
         enhancedCommand.exitCode = result.exitCode ?? 0;
@@ -165,13 +138,12 @@ export async function executeCommand(
           }
         }
       } else if (result.commandStarted && !result.commandFinished) {
-        // Fourth check: Command timed out (started but didn't finish)
+        // Command timed out (started but didn't finish)
         enhancedCommand.status = 'timeout';
         const statusText = result.commandStarted ? 'RUNNING' : 'NOT_STARTED';
         enhancedCommand.result = `Command execution timed out after ${timeout}ms
 
 Command: ${command}
-Shell: ${enhancedCommand.shellType || 'unknown'} (${enhancedCommand.currentWorkingDirectory || 'unknown'})
 
 Status: ${statusText}
 Buffer Output:
@@ -181,7 +153,7 @@ Use 'wait-for-output' to continue monitoring or 'cancel-command' to stop`;
         enhancedCommand.exitCode = 124; // Standard timeout exit code
         logger.debug('Command timed out', { commandId, timeout });
       } else {
-        // Final check: Command failed to start or other error
+        // Command failed to start or other error
         enhancedCommand.status = 'error';
         enhancedCommand.result = result.output || 'Failed to start command execution';
         enhancedCommand.exitCode = result.exitCode ?? 1;
@@ -216,27 +188,25 @@ Use 'wait-for-output' to continue monitoring or 'cancel-command' to stop`;
         enhancedCommand.exitCode = 1;
       }
     }
-    
+
     enhancedCommand.endTime = new Date();
-    
+
     // Log command completion (including timeouts)
     await commandLogger.logCommandUpdate(enhancedCommand);
-    
+
     return commandId;
-    
+
   } catch (error) {
     enhancedCommand.status = 'error';
     enhancedCommand.endTime = new Date();
     enhancedCommand.result = `Error: ${error instanceof Error ? error.message : String(error)}`;
-    
+
     // Log command error
     await commandLogger.logCommandUpdate(enhancedCommand);
-    
+
     throw error;
   }
 }
-
-// Old waitForCommandCompletion function removed - now using CommandExecutor.waitForCommandCompletion
 
 /**
  * Cancel a running command
@@ -245,22 +215,22 @@ export async function cancelCommand(commandId: string): Promise<boolean> {
   try {
     // Get command from persistent storage
     const commandEntry = await commandLogger.getCommandById(commandId);
-    
+
     if (!commandEntry || (commandEntry.status !== 'running' && commandEntry.status !== 'pending')) {
       return false; // Command not found or not cancellable
     }
-    
+
     const command = logEntryToCommand(commandEntry);
-    
+
     // Send Ctrl+C to interrupt the command
     await tmux.executeTmux(`send-keys -t '${command.paneId}' C-c`);
     command.aborted = true;
     command.status = 'cancelled';
     command.endTime = new Date();
-    
+
     // Update persistent storage
     await commandLogger.logCommandUpdate(command);
-    
+
     return true;
   } catch (error) {
     console.error('Error cancelling command:', error);
@@ -288,14 +258,14 @@ export async function listActiveCommands(): Promise<EnhancedCommandExecution[]> 
   try {
     // Get active commands from persistent storage only
     const activeFromLogs = await commandLogger.getActiveCommands();
-    
+
     // Convert log entries to EnhancedCommandExecution format and filter active
     const persistedActive: EnhancedCommandExecution[] = Object.values(activeFromLogs)
       .filter(entry => entry.status === 'running' || entry.status === 'pending')
       .map(entry => logEntryToCommand(entry));
-    
+
     // Sort by start time (newest first)
-    return persistedActive.sort((a, b) => 
+    return persistedActive.sort((a, b) =>
       b.startTime.getTime() - a.startTime.getTime()
     );
   } catch (error) {
@@ -321,22 +291,22 @@ export async function listAllCommands(): Promise<EnhancedCommandExecution[]> {
   try {
     // Get active commands from persistent storage
     const activeCommands = await commandLogger.getActiveCommands();
-    
+
     // Get command history from persistent storage
     const persistedHistory = await commandLogger.getCommandHistory(1000); // Get up to 1000 entries
-    
+
     // Combine active and history commands, converting to EnhancedCommandExecution format
     const allCommands = [
       ...Object.values(activeCommands).map(entry => logEntryToCommand(entry)),
       ...persistedHistory.map(entry => logEntryToCommand(entry))
     ];
-    
+
     // Deduplicate by ID (prefer active over history)
     const uniqueCommands = new Map<string, EnhancedCommandExecution>();
     allCommands.forEach(cmd => uniqueCommands.set(cmd.id, cmd));
-    
+
     // Sort by start time (newest first)
-    return Array.from(uniqueCommands.values()).sort((a, b) => 
+    return Array.from(uniqueCommands.values()).sort((a, b) =>
       b.startTime.getTime() - a.startTime.getTime()
     );
   } catch (error) {
@@ -360,14 +330,14 @@ export function listAllCommandsSync(): EnhancedCommandExecution[] {
  */
 export async function cleanupOldCommands(maxAgeMinutes: number = 60): Promise<void> {
   const now = new Date();
-  
+
   // Get all active commands from persistent storage and handle stuck ones
   try {
     const activeCommands = await commandLogger.getActiveCommands();
-    
+
     for (const [id, commandEntry] of Object.entries(activeCommands)) {
       const command = logEntryToCommand(commandEntry);
-      
+
       if (command.status === 'pending') {
         // Handle stuck pending commands (older than 5 minutes)
         const ageMinutes = (now.getTime() - command.startTime.getTime()) / (1000 * 60);
@@ -376,7 +346,7 @@ export async function cleanupOldCommands(maxAgeMinutes: number = 60): Promise<vo
           command.endTime = new Date();
           command.result = '[TIMEOUT] - Command stuck in pending state';
           command.exitCode = 124;
-          
+
           // Update in persistent storage
           await commandLogger.logCommandUpdate(command);
         }
@@ -386,5 +356,3 @@ export async function cleanupOldCommands(maxAgeMinutes: number = 60): Promise<vo
     console.error('Error during cleanup:', error);
   }
 }
-
-// Old shell detection functions removed - now using ShellContext from shell-strategies.ts

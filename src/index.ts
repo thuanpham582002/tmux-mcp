@@ -274,18 +274,28 @@ async function handleExecuteCommand(args: string[], options: any = {}) {
       }
     }
 
-    // Clean output by removing markers and metadata
+    // Clean output by removing timestamp markers and metadata
     let cleanOutput = finalOutput;
     if (cleanOutput) {
-      // Remove tmux-mcp markers and exit codes
+      // Remove timestamp markers (numbers that look like timestamps) and other noise
       cleanOutput = cleanOutput
         .split('\n')
-        .filter(line =>
-          !line.includes('_S') &&
-          !line.includes('_E') &&
-          !line.includes('~') &&
-          !line.includes('❯')
-        )
+        .filter(line => {
+          // Remove lines that are just timestamp markers
+          const trimmedLine = line.trim();
+
+          // Check if line is just a timestamp (13 digits) followed by optional exit code
+          if (/^\d{13}(\s+\d+)?$/.test(trimmedLine)) {
+            return false;
+          }
+
+          // Remove lines with old markers
+          if (trimmedLine.includes('~') || trimmedLine.includes('❯')) {
+            return false;
+          }
+
+          return true;
+        })
         .join('\n')
         .trim();
     }

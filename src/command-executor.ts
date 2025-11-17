@@ -1,12 +1,11 @@
 /**
- * Command Executor - EXACT copy from tabby-mcp
- * Handles the core command execution logic with exact 3-stage process:
- * 1. executeShellDetection
- * 2. sendSetupScript  
- * 3. waitForCommandCompletion
+ * Simplified Command Executor
+ * Handles the core command execution logic with simple marker-based approach:
+ * 1. Send command with end-marker
+ * 2. Wait for completion marker
+ * 3. Extract output and exit code
  */
 
-import { ShellContext, escapeShellString } from './shell-strategies.js';
 import * as tmux from './tmux.js';
 import { createLogger } from './logger.js';
 
@@ -20,110 +19,77 @@ function stripAnsi(str: string): string {
 }
 
 /**
- * Extract text from a line before the end marker
- * Returns the text portion before the marker, or empty line if only marker is present
+ * Extract timestamp and exit code from marker line
+ * Format: "timestamp exit_code"
  */
-function extractTextBeforeEndMarker(line: string, endMarker: string): string {
-  const markerIndex = line.indexOf(endMarker);
-  if (markerIndex === -1) {
-    return line; // No marker found, return full line
+function parseEndMarker(line: string, expectedTimestamp: string): { exitCode: number; valid: boolean } {
+  const pattern = new RegExp(`^\\s*${expectedTimestamp}\\s+(\\d+)\\s*$`);
+  const match = line.match(pattern);
+
+  if (match) {
+    return {
+      exitCode: parseInt(match[1], 10),
+      valid: true
+    };
   }
-  const textBeforeMarker = line.substring(0, markerIndex);
-  return textBeforeMarker.trim();
+
+  return { exitCode: 1, valid: false };
 }
 
 /**
- * Handles the core command execution logic - EXACT copy from tabby-mcp
+ * Simplified command executor with single end-marker approach
  */
 export class CommandExecutor {
   private readonly MAX_RETRY_ATTEMPTS = 3;
-  public shellContext = new ShellContext();
 
   constructor() {}
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
   /**
-   * Execute shell detection only (without running the command yet)
+   * Execute command directly with end-marker
    */
-  async executeShellDetection(paneId: string, command: string, startMarker: string): Promise<{ shellDetectionResult: any; attempts: number; maxAttempts: number }> {
-    const detectShellScript = this.shellContext.getShellDetectionScript();
-    
+  async executeCommand(paneId: string, command: string, endMarker: string): Promise<void> {
     // Send Ctrl+C to interrupt any running command
     await tmux.executeTmux(`send-keys -t '${paneId}' C-c`);
     await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Send visual separator to distinguish this command execution
-    await tmux.executeTmux(`send-keys -t '${paneId}' -- '############################' Enter`);
-    await this.sleep(50);
-    
-    const trimmedCommand = command.endsWith('\n') ? command.slice(0, -1) : command;
-    
-    // Send command with shell detection
+
+    // Prepare and send command with multiline support
     if (command.includes('\n')) {
-      
-      // Use exact tabby-mcp block format
-      const multiLineScript = `stty -echo;read ds;eval "$ds";read ss;eval "$ss";stty echo; {
-echo "${startMarker}"
+      // Multiline command - send line by line
+      const trimmedCommand = command.endsWith('\n') ? command.slice(0, -1) : command;
+
+      // Create multiline script wrapped in braces
+      const multiLineScript = `{
 ${trimmedCommand}
-}`;
-      
-      // Send line by line to avoid escaping issues with newlines in tmux
+} && echo "${endMarker} $?"`;
+
+      // Send line by line to handle newlines properly
       const scriptLines = multiLineScript.split('\n');
       for (let i = 0; i < scriptLines.length; i++) {
         const line = scriptLines[i];
-        if (i === 0) {
-          // First line - send with continuation
+
+        if (i === scriptLines.length - 1) {
+          // Last line - send and execute
           await tmux.executeTmux(`send-keys -t '${paneId}' -- '${line}' Enter`);
-          await this.sleep(50); // Wait for the command to be processed
-        } else if (i === scriptLines.length - 1) {
-          // Last line - send without continuation
-          await tmux.executeTmux(`send-keys -t '${paneId}' -- '${line}' Enter`);
-          await this.sleep(50); // Wait for the command to be processed
         } else {
-          // Middle lines - send normally
+          // Middle lines - send with continuation
           await tmux.executeTmux(`send-keys -t '${paneId}' -- '${line}' Enter`);
-          await this.sleep(50); // Wait for the command to be processed
         }
+
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     } else {
-      const singleLineScript = `stty -echo;read ds;eval "$ds";read ss;eval "$ss";stty echo;echo "${startMarker}";\\`;
-      await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(singleLineScript)}" Enter`);
-      await this.sleep(100); // Wait for the command to be processed
-      await tmux.executeTmux(`send-keys -t '${paneId}' -- "${escapeShellString(trimmedCommand)}" Enter`);
-      await this.sleep(100); // Wait for the command to be processed
-    }
+      // Single line command
+      const commandWithMarker = `${command}; echo "${endMarker} $?"`;
 
-    // Send shell detection script with proper escaping 
-    await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(detectShellScript)}" Enter`);
+      // Send the command
+      await tmux.sendKeysRaw(paneId, commandWithMarker);
 
-    // Wait for shell detection  
-    let attempts = 0;
-    const maxAttempts = 50;
-    let shellDetectionResult: { shellType: string; currentWorkingDirectory: string; systemInfo?: string } | null = null;
-
-    while (shellDetectionResult === null && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 150));
-      const textAfterSetup = await this.getTerminalBufferText(paneId);
-      shellDetectionResult = this.shellContext.detectShellType(textAfterSetup);
-      attempts++;
-    }
-
-    return { shellDetectionResult, attempts, maxAttempts };
-  }
-
-  /**
-   * Send setup script after shell detection
-   */
-  async sendSetupScript(paneId: string, shellDetectionResult: any, startMarker: string, endMarker: string): Promise<void> {
-    if (shellDetectionResult) {
-      // Send setup script 
-      const shellStrategy = this.shellContext.getStrategy(shellDetectionResult.shellType ?? 'unknown');
-      const setupScript = shellStrategy.getSetupScript(startMarker, endMarker);
-      
-      // Send actual trap setup script 
-      await tmux.executeTmux(`send-keys -t '${paneId}' "${escapeShellString(setupScript)}" Enter`);
+      // Send Enter to execute the command
+      await tmux.executeTmux(`send-keys -t '${paneId}' Enter`);
     }
   }
 
@@ -132,173 +98,126 @@ ${trimmedCommand}
    */
   async waitForCommandCompletion(
     paneId: string,
-    startMarker: string,
     endMarker: string,
     abortedFn: () => boolean,
-    timeout?: number, // No default timeout - will run indefinitely if not specified
-    commandId?: string // Command ID to check persistent storage for cancellation
+    timeout?: number,
+    commandId?: string
   ): Promise<{ output: string; exitCode: number | null; commandStarted: boolean; commandFinished: boolean }> {
     let output = '';
-    let commandStarted = false;
+    let commandStarted = true; // Assume command started since we sent it
     let commandFinished = false;
     let exitCode: number | null = null;
-    
-    // Add timeout protection to prevent infinite waiting 
+
     const startTime = Date.now();
 
     while (!commandFinished && !abortedFn()) {
-      // Check for timeout only if timeout is specified
+      // Check for timeout
       if (timeout && Date.now() - startTime > timeout) {
         console.warn('Command execution timeout reached');
         break;
       }
 
-      // Add 100ms delay to prevent high CPU usage in tight loop
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Check if command was cancelled in persistent storage by another process
+      // Check for external cancellation
       if (commandId) {
         try {
           const commandLogger = (await import('./command-logger.js')).commandLogger;
           const persistentCommand = await commandLogger.getCommandById(commandId);
           if (persistentCommand && persistentCommand.status === 'cancelled') {
             console.log('Command was cancelled externally, stopping wait');
-            exitCode = -1; // Set exit code to indicate cancellation
+            exitCode = -1;
             break;
           }
         } catch (error) {
-          // If we can't check persistent storage, continue with normal flow
           console.warn('Could not check persistent storage for command cancellation:', error);
         }
       }
-      
-      await new Promise(resolve => setTimeout(resolve, 100)); // Poll every 100ms
+
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       // Get terminal buffer
       const textAfter = await this.getTerminalBufferText(paneId);
-
-      // Clean ANSI codes and process output 
       const cleanTextAfter = stripAnsi(textAfter);
       const lines = cleanTextAfter.split('\n');
 
-      // Find start and end markers - use includes() since markers can appear anywhere in line
-    // Step 1: Find endMarker from bottom up first
-    let endIndex = -1;
-    let startIndex = -1;
+      // Find start and end markers - command line as start marker, echo result as end marker
+      let startIndex = -1;
+      let endIndex = -1;
 
-    // Debug: Log buffer content for troubleshooting
-    logger.debug('Looking for markers', { start: startMarker, end: endMarker });
-    logger.debug('Buffer lines (last 5)', { lines: lines.slice(-5).map((line, i) => `${lines.length - 5 + i}: ${line}`) });
+      logger.debug('Looking for markers', { end: endMarker });
 
-    // Step 1: Find endMarker from bottom up
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].includes(endMarker)) {
-        endIndex = i;
-        commandFinished = true;
-        logger.debug('Found end marker', { line: i, content: lines[i] });
-        break;
-      }
-    }
+      // First, find the end marker (echo result with exit code) from bottom up
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
 
-    // If no endMarker found, continue polling in next while loop iteration
-    if (endIndex === -1) {
-      logger.debug('No end marker found, continuing to poll');
-      continue;
-    }
+        // Check if this line contains our end marker with exit code
+        if (line.includes(endMarker)) {
+          // Try to parse the marker format
+          const parsed = parseEndMarker(line, endMarker);
 
-    // Step 2: Find startMarker from endIndex-1 going up
-    for (let j = endIndex - 1; j >= 0; j--) {
-      if (lines[j].includes(startMarker)) {
-        startIndex = j;
-        commandStarted = true;
-        logger.debug('Found start marker', { line: j, content: lines[j] });
-        break;
-      }
-    }
-
-    // If no startMarker found, take last 250 lines as fallback
-    if (startIndex === -1) {
-      logger.debug('No start marker found, using last 250 lines as fallback');
-      const fallbackLines = lines.slice(-250);
-      output = fallbackLines.join('\n').trim();
-      commandStarted = true; // Assume command started
-      // Since we have endMarker, command is finished
-      break;
-    }
-
-    // Extract output between markers 
-      if (commandStarted && startIndex !== -1) {
-        if (commandFinished && endIndex !== -1) {
-          // Complete command - extract between start and end markers
-          // Include text from the end marker line before the marker
-          const extractedLines: string[] = [];
-
-          // Extract lines between start and end markers (excluding start marker line)
-          for (let i = startIndex + 1; i < endIndex; i++) {
-            if (!lines[i].includes(startMarker) && !lines[i].includes(endMarker)) {
-              extractedLines.push(lines[i]);
-            }
+          if (parsed.valid) {
+            endIndex = i;
+            exitCode = parsed.exitCode;
+            logger.debug('Found end marker', { line: i, content: line, exitCode });
+            break;
           }
-
-          // Extract text from the end marker line before the marker
-          const endMarkerLine = lines[endIndex];
-          const textBeforeEndMarker = extractTextBeforeEndMarker(endMarkerLine, endMarker);
-          if (textBeforeEndMarker && !textBeforeEndMarker.includes(startMarker)) {
-            extractedLines.push(textBeforeEndMarker);
-          }
-
-          const commandOutput = extractedLines.join('\n').trim();
-
-          // Extract exit code if available
-          for (let i = endIndex; i < Math.min(endIndex + 5, lines.length); i++) {
-            if (lines[i].startsWith('exit_code:')) {
-              exitCode = parseInt(lines[i].split(':')[1].trim(), 10);
-              logger.debug('Found exit code', { exitCode });
-              break;
-            }
-          }
-
-          output = commandOutput;
-          logger.debug('Complete command output', { length: commandOutput.length, preview: commandOutput.substring(0, 200) });
-          break;
-        } else {
-          // Partial command (timeout case) - extract from start marker to end of buffer
-          const partialOutput = lines.slice(startIndex + 1)
-            .filter((line: string) => !line.includes(startMarker))
-            .join('\n')
-            .trim();
-          
-          output = partialOutput;
-          logger.debug('Partial command output', { length: partialOutput.length, preview: partialOutput.substring(0, 200) });
-          // Continue polling - don't break yet
         }
       }
+
+      // If we found end marker, look for start marker (the command line)
+      if (endIndex !== -1) {
+        for (let i = endIndex - 1; i >= 0; i--) {
+          const line = lines[i];
+
+          // Look for the command line that contains our echo statement
+          if (line.includes('echo') && line.includes(endMarker)) {
+            startIndex = i;
+            commandStarted = true;
+            commandFinished = true;
+            logger.debug('Found start marker (command line)', { line: i, content: line });
+            break;
+          }
+        }
+      }
+
+      // Extract output between markers
+      if (commandStarted && startIndex !== -1 && endIndex !== -1) {
+        // Extract lines between start and end markers (excluding both markers)
+        const outputLines = [];
+        for (let i = startIndex + 1; i < endIndex; i++) {
+          outputLines.push(lines[i]);
+        }
+
+        output = outputLines.join('\n').trim();
+        logger.debug('Command completed', { startIndex, endIndex, outputLength: output.length, exitCode });
+        break;
+      }
+
+      logger.debug('No end marker found, continuing to poll');
+    }
+
+    // Handle timeout case
+    if (!commandFinished) {
+      // Get whatever output we have so far
+      const textAfter = await this.getTerminalBufferText(paneId);
+      const cleanTextAfter = stripAnsi(textAfter);
+      output = cleanTextAfter.trim();
+      exitCode = 124; // Timeout exit code
     }
 
     // Handle empty output
     if (!output || output.trim() === '') {
-      output = 'executed';
+      output = '(no output)';
     }
 
     return { output, exitCode, commandStarted, commandFinished };
   }
 
   /**
-   * Handle existing running command abortion 
+   * Handle existing running command abortion
    */
   async handleExistingCommand(paneId: string): Promise<void> {
-    // For tmux, just send Ctrl+C and wait
     await tmux.executeTmux(`send-keys -t '${paneId}' C-c`);
     await new Promise(resolve => setTimeout(resolve, 500));
-  }
-
-  /**
-   * Get partial output for aborted command
-   */
-  getPartialOutput(paneId: string, startMarker: string): string {
-    // Note: This would need to be async in tmux context, but keeping interface same as tabby-mcp
-    // For now, return empty - this would need terminal buffer access
-    return '';
   }
 
   /**
